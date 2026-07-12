@@ -67,11 +67,10 @@ Depois acesse `http://localhost:8080`.
 ## Testar login
 
 1. Abra o app local ou publicado.
-2. Clique em `Criar conta` se ainda nao tiver usuario.
-3. Cadastre e-mail e senha.
-4. Confirme o e-mail se o Supabase Auth solicitar confirmacao.
-5. Volte ao Login, informe e-mail e senha, e clique em `Entrar`.
-6. Confirme que o app abre `MINHAS OBRAS` e permanece conectado ao recarregar a pagina.
+2. Crie o usuario manualmente no Supabase Auth, se ele ainda nao existir.
+3. Informe `Email` e `Senha` na tela inicial do SOO.
+4. Clique em `Entrar`.
+5. Confirme que o app abre `MINHAS OBRAS` e permanece conectado ao recarregar a pagina.
 
 ## Testar uma despesa
 

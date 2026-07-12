@@ -119,19 +119,11 @@ let activeMeetingTopic = topics[0].id;
 const els = {
   messageArea: document.querySelector("#messageArea"),
   loginView: document.querySelector("#loginView"),
-  signupView: document.querySelector("#signupView"),
-  resetPasswordView: document.querySelector("#resetPasswordView"),
   obrasView: document.querySelector("#obrasView"),
   obraDetailView: document.querySelector("#obraDetailView"),
   loginForm: document.querySelector("#loginForm"),
   loginEmail: document.querySelector("#loginEmail"),
   loginPassword: document.querySelector("#loginPassword"),
-  signupForm: document.querySelector("#signupForm"),
-  signupEmail: document.querySelector("#signupEmail"),
-  signupPassword: document.querySelector("#signupPassword"),
-  signupPasswordConfirm: document.querySelector("#signupPasswordConfirm"),
-  resetPasswordForm: document.querySelector("#resetPasswordForm"),
-  resetEmail: document.querySelector("#resetEmail"),
   sessionBar: document.querySelector("#sessionBar"),
   userEmail: document.querySelector("#userEmail"),
   logoutButton: document.querySelector("#logoutButton"),
@@ -200,8 +192,6 @@ async function init() {
 
 function bindEvents() {
   els.loginForm.addEventListener("submit", handleLogin);
-  els.signupForm.addEventListener("submit", handleSignup);
-  els.resetPasswordForm.addEventListener("submit", handleResetPassword);
   els.logoutButton.addEventListener("click", () => supabase.auth.signOut());
   els.newObraButton.addEventListener("click", () => toggleForm(els.obraForm, true));
   els.obraForm.addEventListener("submit", handleCreateObra);
@@ -217,13 +207,6 @@ function bindEvents() {
     button.addEventListener("click", () => {
       const form = document.querySelector(`#${button.dataset.closeForm}`);
       toggleForm(form, false);
-    });
-  });
-
-  document.querySelectorAll("[data-auth-view]").forEach((button) => {
-    button.addEventListener("click", () => {
-      clearMessage();
-      showAuthView(button.dataset.authView);
     });
   });
 
@@ -277,62 +260,7 @@ async function handleLogin(event) {
     if (error) throw error;
     showMessage("Login realizado com sucesso.", "success");
   } catch (error) {
-    showMessage(error.message, "error");
-  }
-}
-
-async function handleSignup(event) {
-  event.preventDefault();
-  clearMessage();
-  if (!supabase) {
-    showMessage("Configure SUPABASE_URL e SUPABASE_PUBLISHABLE_KEY antes de criar conta.", "warning");
-    return;
-  }
-
-  const email = els.signupEmail.value.trim();
-  const password = els.signupPassword.value;
-  const confirmPassword = els.signupPasswordConfirm.value;
-  if (password !== confirmPassword) {
-    showMessage("As senhas nao conferem.", "warning");
-    return;
-  }
-
-  try {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { emailRedirectTo: window.location.href.split("#")[0] }
-    });
-    if (error) throw error;
-    if (data.session) {
-      showMessage("Conta criada com sucesso.", "success");
-    } else {
-      showMessage("Conta criada. Verifique seu e-mail para confirmar o cadastro antes de entrar.", "success");
-      showAuthView("login");
-      els.loginEmail.value = email;
-    }
-  } catch (error) {
-    showMessage(error.message, "error");
-  }
-}
-
-async function handleResetPassword(event) {
-  event.preventDefault();
-  clearMessage();
-  if (!supabase) {
-    showMessage("Configure SUPABASE_URL e SUPABASE_PUBLISHABLE_KEY antes de recuperar senha.", "warning");
-    return;
-  }
-
-  try {
-    const { error } = await supabase.auth.resetPasswordForEmail(els.resetEmail.value.trim(), {
-      redirectTo: window.location.href.split("#")[0]
-    });
-    if (error) throw error;
-    showMessage("Enviamos as instrucoes de redefinicao para seu e-mail.", "success");
-    showAuthView("login");
-  } catch (error) {
-    showMessage(error.message, "error");
+    showMessage("Email ou senha incorretos. Verifique os dados e tente novamente.", "error");
   }
 }
 
@@ -722,22 +650,10 @@ function getTopicState(state, topicId) {
 
 function showView(view) {
   els.loginView.hidden = view !== "login";
-  els.signupView.hidden = true;
-  els.resetPasswordView.hidden = true;
   els.obrasView.hidden = view !== "obras";
   els.obraDetailView.hidden = view !== "obra";
   els.sessionBar.hidden = view === "login";
   if (view === "login") els.userEmail.textContent = "";
-}
-
-function showAuthView(view) {
-  els.loginView.hidden = view !== "login";
-  els.signupView.hidden = view !== "signup";
-  els.resetPasswordView.hidden = view !== "reset";
-  els.obrasView.hidden = true;
-  els.obraDetailView.hidden = true;
-  els.sessionBar.hidden = true;
-  els.userEmail.textContent = "";
 }
 
 function toggleForm(form, visible) {
