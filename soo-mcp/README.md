@@ -2,21 +2,25 @@
 
 Servidor MCP remoto do SOO para Cloudflare Workers.
 
-Ele expõe ferramentas para o ChatGPT listar obras, buscar contatos, listar categorias e criar uma despesa com comprovante no Supabase após confirmação do usuário.
+Esta versão é uma prova de compatibilidade de anexos entre ChatGPT e um servidor MCP remoto. Ela não usa `SUPABASE_SERVICE_ROLE_KEY`, não cria despesas e não grava arquivos.
 
-## Segurança
+## Estado desta etapa
 
-- O Worker exige `Authorization: Bearer SOO_MCP_API_TOKEN`.
-- O front-end do SOO não usa nem recebe `SUPABASE_SERVICE_ROLE_KEY`.
-- A chave `service_role` deve existir apenas como secret do Worker ou em `.dev.vars` local.
-- O ChatGPT nunca envia `owner_id`; o Worker sempre usa `SOO_OWNER_ID`.
-- O endpoint `/health` retorna apenas `{ "status": "ok" }`.
+- Transporte: Streamable HTTP via SDK oficial TypeScript do MCP.
+- SDK MCP: `@modelcontextprotocol/sdk@1.29.0`.
+- Endpoint MCP: `/mcp`.
+- Health check: `/health`.
+- Autenticação: `Authorization: Bearer SOO_MCP_API_TOKEN`.
+- Ferramenta ativa para a prova: `testar_recebimento_comprovante`.
+- Ferramenta `criar_despesa_com_comprovante`: registrada, mas desativada.
+- Ferramentas Supabase (`listar_obras` e `buscar_contatos`): temporariamente desativadas para esta prova.
 
 ## Estrutura
 
 ```text
 soo-mcp/
   package.json
+  package-lock.json
   tsconfig.json
   wrangler.jsonc
   src/index.ts
@@ -26,44 +30,18 @@ soo-mcp/
 
 ## Instalar dependências
 
+O comando esperado em uma máquina com npm é:
+
 ```bash
 cd soo-mcp
 npm install
 ```
 
-## Login no Wrangler
+Neste ambiente local do Codex, `npm` não está instalado diretamente no PATH. Para validar a etapa, o npm foi executado via runtime temporário:
 
 ```bash
-npx wrangler login
-npx wrangler whoami
-```
-
-## Configurar secrets
-
-Nunca commit `.dev.vars` com valores reais.
-
-Para desenvolvimento local, copie o exemplo:
-
-```bash
-cp .dev.vars.example .dev.vars
-```
-
-Preencha em `.dev.vars`:
-
-```text
-SUPABASE_URL=https://SEU_PROJETO.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=...
-SOO_MCP_API_TOKEN=...
-SOO_OWNER_ID=...
-```
-
-Para produção, grave os secrets no Cloudflare:
-
-```bash
-npx wrangler secret put SUPABASE_URL
-npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
-npx wrangler secret put SOO_MCP_API_TOKEN
-npx wrangler secret put SOO_OWNER_ID
+pnpm dlx npm@11.6.4 install --ignore-scripts
+pnpm dlx npm@11.6.4 run typecheck
 ```
 
 ## Executar localmente
@@ -84,85 +62,45 @@ Health:
 curl http://localhost:8787/health
 ```
 
-## Publicar
+## Secrets
 
-Depois de revisar os arquivos e configurar os secrets:
+Para esta prova, apenas `SOO_MCP_API_TOKEN` é necessário para autenticar chamadas MCP.
+
+`.dev.vars.example` mantém nomes de variáveis futuras, mas `SUPABASE_SERVICE_ROLE_KEY` não é lida pelo Worker nesta etapa.
+
+Para produção futura, gravar secrets no Cloudflare, nunca no repositório:
 
 ```bash
-npm run deploy
-```
-
-URL MCP publicada:
-
-```text
-https://soo-mcp.<sua-conta>.workers.dev/mcp
-```
-
-## Conectar ao ChatGPT
-
-No ChatGPT, cadastre um conector/MCP remoto usando:
-
-```text
-https://soo-mcp.<sua-conta>.workers.dev/mcp
-```
-
-Configure o cabeçalho:
-
-```text
-Authorization: Bearer <SOO_MCP_API_TOKEN>
+npx wrangler secret put SUPABASE_URL
+npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+npx wrangler secret put SOO_MCP_API_TOKEN
+npx wrangler secret put SOO_OWNER_ID
 ```
 
 ## Ferramentas MCP
 
-### listar_obras
+### testar_recebimento_comprovante
 
-Sem parâmetros.
+Ferramenta temporária para verificar se um comprovante chega aos argumentos da chamada MCP.
 
-Retorna:
+Retorno:
 
-- `id`
-- `nome`
-- `cliente`
-- `cidade`
-- `status`
+- `recebido`
+- `filename`
+- `mime_type`
+- `tamanho_bytes`
+- `sha256`
 
-### buscar_contatos
+O conteúdo do arquivo nunca é retornado.
 
-Parâmetros:
+### Formato aceito para arquivo
 
-```json
-{ "termo": "joao" }
-```
+O MCP define argumentos de ferramentas por JSON Schema. Na especificação atual, há conteúdo binário em resultados (`image`, `audio`) e recursos, mas não há um tipo universal de argumento binário que obrigue clientes como o ChatGPT a converter automaticamente anexos do usuário em um parâmetro da ferramenta.
 
-Retorna:
-
-- `id`
-- `nome`
-- `tipos`
-- `cpf_cnpj`
-- `telefone`
-
-### listar_categorias
-
-Retorna a lista inicial de categorias do SOO.
-
-### criar_despesa_com_comprovante
-
-Parâmetros principais:
+Por isso, esta ferramenta aceita explicitamente este formato JSON para teste manual/protocolar:
 
 ```json
 {
-  "obra_id": "uuid-da-obra",
-  "descricao": "Compra de argamassa",
-  "valor": 123.45,
-  "data": "2026-07-12",
-  "contato_id": "uuid-opcional",
-  "contato_nome": "Nome opcional sem criar contato",
-  "quem_pagou": "Murakami",
-  "categoria": "A classificar",
-  "observacao": "Texto opcional",
-  "idempotency_key": "chave-unica-da-solicitacao",
-  "confirmacao_usuario": true,
   "comprovante": {
     "filename": "comprovante.png",
     "mime_type": "image/png",
@@ -171,7 +109,7 @@ Parâmetros principais:
 }
 ```
 
-O campo `comprovante` aceita:
+MIME types aceitos:
 
 - `image/jpeg`
 - `image/png`
@@ -180,15 +118,43 @@ O campo `comprovante` aceita:
 
 Limite: 10 MB.
 
-O arquivo é salvo no bucket privado `comprovantes` em:
+Importante: este formato não significa que o ChatGPT preencherá `data_base64` automaticamente quando o usuário anexar uma imagem na conversa. A prova serve justamente para observar se o cliente MCP remoto encaminha algum conteúdo de anexo aos argumentos. Se nada chegar, a ferramenta retorna `recebido: false`.
 
-```text
-SOO_OWNER_ID/obra_id/AAAA/MM/uuid.ext
+### criar_despesa_com_comprovante
+
+Desativada nesta etapa.
+
+Enquanto a prova de anexos não for concluída, a ferramenta sempre retorna erro controlado e não:
+
+- lê `SUPABASE_SERVICE_ROLE_KEY`;
+- envia arquivo ao Storage;
+- cria registro em `despesas`;
+- grava qualquer conteúdo.
+
+## Idempotência futura
+
+Na reativação de `criar_despesa_com_comprovante`, a idempotência deve sair de `observacao` e ir para uma coluna própria.
+
+SQL recomendado para revisão antes de aplicar:
+
+```sql
+alter table public.despesas
+add column if not exists idempotency_key text;
+
+create unique index if not exists despesas_owner_id_idempotency_key_key
+on public.despesas (owner_id, idempotency_key)
+where idempotency_key is not null;
 ```
 
-O banco salva apenas `comprovante_path`.
+Fluxo futuro:
 
-## Testar MCP com curl
+- exigir ou gerar `idempotency_key`;
+- consultar `despesas` por `owner_id + idempotency_key`;
+- se existir, retornar a despesa já criada;
+- se não existir, fazer upload, inserir despesa e salvar `idempotency_key`;
+- se o insert falhar depois do upload, remover o arquivo enviado.
+
+## Testar com curl
 
 Defina:
 
@@ -217,45 +183,60 @@ curl -X POST "$MCP_URL" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
 ```
 
-Listar obras:
+Testar sem arquivo:
 
 ```bash
 curl -X POST "$MCP_URL" \
   -H "Authorization: Bearer $MCP_TOKEN" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
-  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"listar_obras","arguments":{}}}'
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"testar_recebimento_comprovante","arguments":{}}}'
 ```
 
-Buscar contatos:
+Testar com arquivo em base64:
 
 ```bash
+BASE64=$(base64 -i comprovante.png)
+
 curl -X POST "$MCP_URL" \
   -H "Authorization: Bearer $MCP_TOKEN" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
-  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"buscar_contatos","arguments":{"termo":"fornecedor"}}}'
+  -d "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"testar_recebimento_comprovante\",\"arguments\":{\"comprovante\":{\"filename\":\"comprovante.png\",\"mime_type\":\"image/png\",\"data_base64\":\"$BASE64\"}}}}"
 ```
 
-## Testar upload de arquivo
+## Conectar ao ChatGPT para a prova
 
-Gere base64:
+Depois de publicar em uma etapa futura, cadastrar a URL:
+
+```text
+https://soo-mcp.<sua-conta>.workers.dev/mcp
+```
+
+Cabeçalho:
+
+```text
+Authorization: Bearer <SOO_MCP_API_TOKEN>
+```
+
+Teste esperado:
+
+1. Enviar uma imagem de comprovante ao ChatGPT.
+2. Pedir para chamar `testar_recebimento_comprovante`.
+3. Verificar se os argumentos da ferramenta receberam algum arquivo.
+4. Se a resposta for `recebido: false`, o ChatGPT não encaminhou o anexo como argumento MCP no formato usado nesta prova.
+
+## Publicar
+
+Não publicar antes da revisão.
+
+Quando a revisão aprovar:
 
 ```bash
-base64 -i comprovante.png
+npm run deploy
 ```
 
-Use o valor em `data_base64` ao chamar `criar_despesa_com_comprovante`.
-
-Importante: primeiro o ChatGPT deve interpretar o comprovante e pedir confirmação ao usuário. Só chame a ferramenta com `confirmacao_usuario: true` após a confirmação.
-
-## Idempotência
-
-A ferramenta aceita `idempotency_key`. Se a mesma chave for usada novamente, o Worker retorna a despesa já criada e não insere duplicidade.
-
-Quando a chave não é enviada, o Worker calcula uma chave a partir dos principais campos e do comprovante.
-
-## Revogar o token
+## Revogar token
 
 Gere um novo token forte e atualize o secret:
 
@@ -263,13 +244,7 @@ Gere um novo token forte e atualize o secret:
 npx wrangler secret put SOO_MCP_API_TOKEN
 ```
 
-Depois faça um novo deploy, se necessário:
-
-```bash
-npm run deploy
-```
-
-Para remover o secret:
+Para remover:
 
 ```bash
 npx wrangler secret delete SOO_MCP_API_TOKEN

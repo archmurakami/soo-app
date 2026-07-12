@@ -10,8 +10,12 @@
     "check": "wrangler check"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "latest",
-    "typescript": "latest",
-    "wrangler": "latest"
+    "@cloudflare/workers-types": "5.20260711.1",
+    "typescript": "7.0.2",
+    "wrangler": "4.110.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "zod": "4.4.3"
   }
 }
