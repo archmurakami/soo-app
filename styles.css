@@ -384,7 +384,7 @@ select:focus {
 
 .expense-row {
   display: grid;
-  grid-template-columns: 110px minmax(180px, 1.2fr) minmax(120px, 0.8fr) 120px minmax(120px, 0.8fr) minmax(100px, 0.7fr) 150px;
+  grid-template-columns: 110px minmax(180px, 1.2fr) minmax(120px, 0.8fr) 120px minmax(120px, 0.8fr) minmax(100px, 0.7fr) 150px auto;
   gap: 10px;
   align-items: center;
   min-height: 72px;
@@ -392,10 +392,22 @@ select:focus {
   background: #fff;
   border: 1px solid var(--line);
   border-radius: 8px;
+  cursor: pointer;
 }
 
 .expense-row span {
   color: var(--muted);
+}
+
+.expense-row:hover,
+.expense-row:focus-visible {
+  border-color: var(--green-800);
+  outline: 3px solid rgba(45, 125, 89, 0.14);
+  outline-offset: 1px;
+}
+
+.edit-expense-button {
+  min-height: 44px;
 }
 
 .receipt {
@@ -489,7 +501,7 @@ select:focus {
 }
 
 .receipt-preview {
-  grid-template-columns: 86px minmax(0, 1fr) auto;
+  grid-template-columns: 86px minmax(0, 1fr) auto auto auto;
   align-items: center;
 }
 
@@ -656,7 +668,7 @@ select:focus {
   }
 
   .receipt-preview .button {
-    grid-column: 1 / -1;
+    width: 100%;
   }
 
   .receipt-thumb {

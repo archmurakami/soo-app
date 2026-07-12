@@ -118,7 +118,7 @@
 
         <section id="despesasSection">
           <form id="despesaForm" class="panel form-panel" hidden>
-            <h2>Nova despesa</h2>
+            <h2 id="despesaFormTitle">Nova despesa</h2>
             <div class="form-grid">
               <label>Obra
                 <input id="despesaObraNome" disabled>
@@ -163,6 +163,8 @@
                     <strong id="comprovanteName"></strong>
                     <span id="comprovanteStatus">Enviando...</span>
                   </div>
+                  <button id="openComprovanteButton" class="button secondary" type="button">Abrir</button>
+                  <button id="replaceComprovanteButton" class="button secondary" type="button">Substituir</button>
                   <button id="removeComprovanteButton" class="button secondary" type="button">Remover</button>
                 </div>
               </div>
@@ -196,8 +198,8 @@
             </div>
 
             <div class="actions">
-              <button class="button secondary" type="button" data-close-form="despesaForm">Cancelar</button>
-              <button class="button primary" type="submit">Salvar despesa</button>
+              <button id="cancelDespesaButton" class="button secondary" type="button">Cancelar</button>
+              <button id="saveDespesaButton" class="button primary" type="submit">Salvar despesa</button>
             </div>
           </form>
 

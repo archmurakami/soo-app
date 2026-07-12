@@ -40,6 +40,30 @@ export async function criarDespesa(ownerId, despesa) {
   return data;
 }
 
+export async function atualizarDespesa(ownerId, despesaId, despesa) {
+  const categoria = despesa.categoria || "A classificar";
+  const { data, error } = await requireSupabase()
+    .from(TABLE)
+    .update({
+      contato_id: despesa.contato_id || null,
+      descricao: despesa.descricao,
+      valor: Number(despesa.valor || 0),
+      data: despesa.data,
+      quem_pagou: despesa.quem_pagou || null,
+      categoria,
+      observacao: despesa.observacao || null,
+      comprovante_path: despesa.comprovante_path || null,
+      status_classificacao: categoria === "A classificar" ? "a_classificar" : "classificada"
+    })
+    .eq("id", despesaId)
+    .eq("owner_id", ownerId)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
 export async function uploadComprovante(ownerId, obraId, file) {
   if (!file) return { path: null, warning: null };
 
@@ -62,4 +86,17 @@ export async function uploadComprovante(ownerId, obraId, file) {
   }
 
   return { path, warning: null };
+}
+
+export async function removerComprovante(path) {
+  if (!path) return;
+  const { error } = await requireSupabase().storage.from(BUCKET).remove([path]);
+  if (error) throw error;
+}
+
+export async function obterUrlComprovante(path) {
+  if (!path) return null;
+  const { data, error } = await requireSupabase().storage.from(BUCKET).createSignedUrl(path, 60 * 60);
+  if (error) throw error;
+  return data.signedUrl;
 }
