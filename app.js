@@ -118,6 +118,14 @@ let activeMeetingTopic = topics[0].id;
 let currentView = "login";
 let handledInitialSession = false;
 let homeLoadPromise = null;
+let comprovanteState = {
+  file: null,
+  path: null,
+  warning: null,
+  previewUrl: null,
+  uploadPromise: null
+};
+let comprovanteUploadSeq = 0;
 
 const els = {
   messageArea: document.querySelector("#messageArea"),
@@ -141,6 +149,15 @@ const els = {
   newDespesaButton: document.querySelector("#newDespesaButton"),
   despesaForm: document.querySelector("#despesaForm"),
   despesaObraNome: document.querySelector("#despesaObraNome"),
+  comprovanteInput: document.querySelector("#comprovanteInput"),
+  comprovanteDropZone: document.querySelector("#comprovanteDropZone"),
+  comprovanteEmpty: document.querySelector("#comprovanteEmpty"),
+  comprovantePreview: document.querySelector("#comprovantePreview"),
+  comprovanteThumb: document.querySelector("#comprovanteThumb"),
+  comprovanteName: document.querySelector("#comprovanteName"),
+  comprovanteStatus: document.querySelector("#comprovanteStatus"),
+  selectComprovanteButton: document.querySelector("#selectComprovanteButton"),
+  removeComprovanteButton: document.querySelector("#removeComprovanteButton"),
   contatoSearch: document.querySelector("#contatoSearch"),
   contatosOptions: document.querySelector("#contatosOptions"),
   quickContactPanel: document.querySelector("#quickContactPanel"),
@@ -244,6 +261,13 @@ function bindEvents() {
   els.backToObras.addEventListener("click", () => loadHome());
   els.newDespesaButton.addEventListener("click", () => openDespesaForm());
   els.despesaForm.addEventListener("submit", handleCreateDespesa);
+  els.selectComprovanteButton.addEventListener("click", () => els.comprovanteInput.click());
+  els.comprovanteInput.addEventListener("change", () => handleComprovanteFile(els.comprovanteInput.files?.[0]));
+  els.removeComprovanteButton.addEventListener("click", clearComprovante);
+  els.comprovanteDropZone.addEventListener("dragover", handleComprovanteDragOver);
+  els.comprovanteDropZone.addEventListener("dragleave", () => els.comprovanteDropZone.classList.remove("dragging"));
+  els.comprovanteDropZone.addEventListener("drop", handleComprovanteDrop);
+  document.addEventListener("paste", handleComprovantePaste);
   els.contatoSearch.addEventListener("input", handleContactSearch);
   els.saveQuickContact.addEventListener("click", handleQuickContact);
   els.clearSection.addEventListener("click", clearCurrentMeetingTopic);
@@ -365,6 +389,7 @@ async function openObra(obraId) {
 
 function openDespesaForm() {
   els.despesaForm.reset();
+  clearComprovante();
   els.despesaObraNome.value = currentObra.nome;
   els.despesaForm.elements.data.valueAsDate = new Date();
   els.despesaForm.elements.categoria.value = "A classificar";
@@ -377,10 +402,11 @@ async function handleCreateDespesa(event) {
   event.preventDefault();
   clearMessage();
   const formData = new FormData(els.despesaForm);
-  const file = formData.get("comprovante");
 
   try {
-    const uploadResult = await uploadComprovante(session.user.id, currentObra.id, file && file.size ? file : null);
+    if (comprovanteState.uploadPromise) {
+      await comprovanteState.uploadPromise;
+    }
     const despesa = await criarDespesa(session.user.id, {
       obra_id: currentObra.id,
       contato_id: els.contatoSearch.dataset.contatoId || null,
@@ -390,17 +416,113 @@ async function handleCreateDespesa(event) {
       quem_pagou: formData.get("quem_pagou"),
       categoria: formData.get("categoria"),
       observacao: formData.get("observacao"),
-      comprovante_path: uploadResult.path
+      comprovante_path: comprovanteState.path
     });
 
     despesas = [despesa, ...despesas];
     toggleForm(els.despesaForm, false);
     renderObraSummary();
     renderDespesas();
-    showMessage(uploadResult.warning || "Despesa salva com sucesso.", uploadResult.warning ? "warning" : "success");
+    showMessage(comprovanteState.warning || "Despesa salva com sucesso.", comprovanteState.warning ? "warning" : "success");
   } catch (error) {
     showMessage(error.message, "error");
   }
+}
+
+function handleComprovanteDragOver(event) {
+  event.preventDefault();
+  if (els.despesaForm.hidden) return;
+  els.comprovanteDropZone.classList.add("dragging");
+}
+
+function handleComprovanteDrop(event) {
+  event.preventDefault();
+  els.comprovanteDropZone.classList.remove("dragging");
+  if (els.despesaForm.hidden) return;
+  handleComprovanteFile(event.dataTransfer.files?.[0]);
+}
+
+function handleComprovantePaste(event) {
+  if (els.despesaForm.hidden || currentView !== "obra") return;
+  const items = Array.from(event.clipboardData?.items || []);
+  const imageItem = items.find((item) => item.kind === "file" && item.type.startsWith("image/"));
+  if (!imageItem) return;
+  const file = imageItem.getAsFile();
+  if (file) {
+    event.preventDefault();
+    handleComprovanteFile(file);
+  }
+}
+
+function handleComprovanteFile(file) {
+  if (!file) return;
+  if (!currentObra || !session?.user) {
+    showMessage("Abra uma obra antes de enviar comprovante.", "warning");
+    return;
+  }
+
+  clearComprovante();
+  comprovanteState.file = file;
+  comprovanteState.previewUrl = file.type.startsWith("image/") ? URL.createObjectURL(file) : null;
+  renderComprovante("Enviando...");
+
+  const uploadSeq = ++comprovanteUploadSeq;
+  comprovanteState.uploadPromise = uploadComprovante(session.user.id, currentObra.id, file)
+    .then((result) => {
+      if (uploadSeq !== comprovanteUploadSeq) return result;
+      comprovanteState.path = result.path;
+      comprovanteState.warning = result.warning;
+      renderComprovante(result.warning ? "Nao enviado" : "Enviado");
+      if (result.warning) showMessage(result.warning, "warning");
+      return result;
+    })
+    .catch((error) => {
+      if (uploadSeq !== comprovanteUploadSeq) return { path: null, warning: null };
+      comprovanteState.warning = "Nao foi possivel enviar o comprovante. A despesa podera ser salva sem comprovante.";
+      renderComprovante("Nao enviado");
+      showMessage(error.message || comprovanteState.warning, "error");
+      return { path: null, warning: comprovanteState.warning };
+    })
+    .finally(() => {
+      if (uploadSeq === comprovanteUploadSeq) comprovanteState.uploadPromise = null;
+    });
+}
+
+function clearComprovante() {
+  comprovanteUploadSeq += 1;
+  if (comprovanteState.previewUrl) URL.revokeObjectURL(comprovanteState.previewUrl);
+  comprovanteState = {
+    file: null,
+    path: null,
+    warning: null,
+    previewUrl: null,
+    uploadPromise: null
+  };
+  els.comprovanteInput.value = "";
+  renderComprovante("");
+}
+
+function renderComprovante(statusText) {
+  const hasFile = Boolean(comprovanteState.file);
+  els.comprovanteEmpty.hidden = hasFile;
+  els.comprovantePreview.hidden = !hasFile;
+  els.comprovanteDropZone.classList.toggle("has-file", hasFile);
+  els.comprovanteName.textContent = comprovanteState.file?.name || "";
+  els.comprovanteStatus.textContent = statusText;
+  els.comprovanteThumb.innerHTML = "";
+
+  if (!hasFile) return;
+  if (comprovanteState.previewUrl) {
+    const image = document.createElement("img");
+    image.src = comprovanteState.previewUrl;
+    image.alt = "Miniatura do comprovante";
+    els.comprovanteThumb.appendChild(image);
+    return;
+  }
+
+  const badge = document.createElement("span");
+  badge.textContent = "PDF";
+  els.comprovanteThumb.appendChild(badge);
 }
 
 function handleContactSearch() {

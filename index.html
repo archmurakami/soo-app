@@ -150,9 +150,22 @@
                   <option value="Taxas"></option>
                 </datalist>
               </label>
-              <label>Comprovante
-                <input name="comprovante" type="file" accept="image/*,.pdf">
-              </label>
+              <div class="receipt-upload" id="comprovanteDropZone">
+                <input id="comprovanteInput" name="comprovante" type="file" accept="image/*,.pdf" hidden>
+                <div class="receipt-empty" id="comprovanteEmpty">
+                  <strong>Comprovante</strong>
+                  <span>Arraste, cole uma imagem ou selecione no aparelho.</span>
+                  <button id="selectComprovanteButton" class="button secondary" type="button">Selecionar arquivo</button>
+                </div>
+                <div class="receipt-preview" id="comprovantePreview" hidden>
+                  <div id="comprovanteThumb" class="receipt-thumb"></div>
+                  <div>
+                    <strong id="comprovanteName"></strong>
+                    <span id="comprovanteStatus">Enviando...</span>
+                  </div>
+                  <button id="removeComprovanteButton" class="button secondary" type="button">Remover</button>
+                </div>
+              </div>
               <label class="span-2">Observação
                 <textarea name="observacao" rows="3"></textarea>
               </label>
