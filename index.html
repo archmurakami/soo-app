@@ -39,23 +39,72 @@
         <div class="auth-panel">
           <p class="eyebrow">Acesso seguro</p>
           <h1>Entrar no SOO</h1>
-          <p>Informe seu e-mail para receber um link de acesso. Sua sessão fica salva neste aparelho.</p>
+          <p class="login-copy">Use seu e-mail e senha para acessar. Sua sessao fica salva neste aparelho.</p>
           <form id="loginForm" class="stack-form">
             <label>E-mail
               <input id="loginEmail" type="email" autocomplete="email" required placeholder="voce@email.com">
             </label>
-            <button class="button primary" type="submit">Enviar link de acesso</button>
+            <label>Senha
+              <input id="loginPassword" type="password" autocomplete="current-password" required placeholder="Sua senha">
+            </label>
+            <button class="button primary" type="submit">Entrar</button>
           </form>
+          <div class="auth-links">
+            <button type="button" data-auth-view="signup">Criar conta</button>
+            <button type="button" data-auth-view="reset">Esqueci minha senha</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="signupView" class="auth-view" hidden>
+        <div class="auth-panel">
+          <p class="eyebrow">Primeiro acesso</p>
+          <h1>Criar conta</h1>
+          <p>Cadastre uma senha para entrar no SOO e gerenciar suas obras.</p>
+          <form id="signupForm" class="stack-form">
+            <label>E-mail
+              <input id="signupEmail" type="email" autocomplete="email" required placeholder="voce@email.com">
+            </label>
+            <label>Senha
+              <input id="signupPassword" type="password" autocomplete="new-password" required minlength="6" placeholder="Minimo 6 caracteres">
+            </label>
+            <label>Confirmar senha
+              <input id="signupPasswordConfirm" type="password" autocomplete="new-password" required minlength="6" placeholder="Repita a senha">
+            </label>
+            <button class="button primary" type="submit">Criar conta</button>
+          </form>
+          <div class="auth-links">
+            <button type="button" data-auth-view="login">Ja tenho conta</button>
+            <button type="button" data-auth-view="reset">Esqueci minha senha</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="resetPasswordView" class="auth-view" hidden>
+        <div class="auth-panel">
+          <p class="eyebrow">Recuperar acesso</p>
+          <h1>Esqueci minha senha</h1>
+          <p>Informe seu e-mail para receber as instrucoes de redefinicao de senha.</p>
+          <form id="resetPasswordForm" class="stack-form">
+            <label>E-mail
+              <input id="resetEmail" type="email" autocomplete="email" required placeholder="voce@email.com">
+            </label>
+            <button class="button primary" type="submit">Enviar instrucoes</button>
+          </form>
+          <div class="auth-links">
+            <button type="button" data-auth-view="login">Voltar ao login</button>
+            <button type="button" data-auth-view="signup">Criar conta</button>
+          </div>
         </div>
       </section>
 
       <section id="obrasView" class="workspace" hidden>
         <div class="topbar">
           <div>
-            <p class="eyebrow">Minhas obras</p>
-            <h1>Obras</h1>
+            <p class="eyebrow">SOO</p>
+            <h1>MINHAS OBRAS</h1>
           </div>
-          <button id="newObraButton" class="button primary" type="button">+ Nova obra</button>
+          <button id="newObraButton" class="button primary" type="button">+ Nova Obra</button>
         </div>
         <form id="obraForm" class="panel form-panel" hidden>
           <h2>Nova obra</h2>
