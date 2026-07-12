@@ -2,10 +2,6 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import * as z from "zod/v4";
 
-type Env = {
-  SOO_MCP_API_TOKEN: string;
-};
-
 type ComprovanteInput = {
   filename: string;
   mime_type: string;
@@ -33,7 +29,7 @@ const ComprovanteSchema = z.object({
 const rateBuckets = new Map<string, { count: number; resetAt: number }>();
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname === "/health") {
@@ -50,9 +46,6 @@ export default {
 
     const originError = validateOrigin(request);
     if (originError) return originError;
-
-    const authError = await authorize(request, env);
-    if (authError) return authError;
 
     const rateError = rateLimit(request);
     if (rateError) return rateError;
@@ -161,30 +154,6 @@ async function sha256(bytes: Uint8Array) {
   new Uint8Array(buffer).set(bytes);
   const digest = await crypto.subtle.digest("SHA-256", buffer);
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-async function authorize(request: Request, env: Env) {
-  const value = request.headers.get("authorization") || "";
-  const expected = `Bearer ${env.SOO_MCP_API_TOKEN}`;
-  if (!(await timingSafeEqual(value, expected))) {
-    return json({ error: "unauthorized" }, 401, request);
-  }
-  return null;
-}
-
-async function timingSafeEqual(a: string, b: string) {
-  const encoder = new TextEncoder();
-  const left = encoder.encode(a);
-  const right = encoder.encode(b);
-  if (left.byteLength !== right.byteLength) return false;
-
-  const leftHash = new Uint8Array(await crypto.subtle.digest("SHA-256", left));
-  const rightHash = new Uint8Array(await crypto.subtle.digest("SHA-256", right));
-  let diff = 0;
-  for (let index = 0; index < leftHash.length; index += 1) {
-    diff |= leftHash[index] ^ rightHash[index];
-  }
-  return diff === 0;
 }
 
 function validateOrigin(request: Request) {

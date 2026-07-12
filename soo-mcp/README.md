@@ -10,7 +10,7 @@ Esta versão é uma prova de compatibilidade de anexos entre ChatGPT e um servid
 - SDK MCP: `@modelcontextprotocol/sdk@1.29.0`.
 - Endpoint MCP: `/mcp`.
 - Health check: `/health`.
-- Autenticação: `Authorization: Bearer SOO_MCP_API_TOKEN`.
+- Autenticação: temporariamente desativada para permitir cadastro do conector no ChatGPT com a opção "Sem autenticação".
 - Ferramenta publicada: `testar_recebimento_comprovante`.
 - Nenhuma ferramenta de Supabase ou criação de despesa é registrada nesta publicação.
 
@@ -63,11 +63,11 @@ curl http://localhost:8787/health
 
 ## Secrets
 
-Para esta prova, apenas `SOO_MCP_API_TOKEN` é necessário para autenticar chamadas MCP.
+Nenhum secret é necessário para a prova pública sem autenticação.
 
-`.dev.vars.example` contém somente o nome do token usado nesta etapa.
+`.dev.vars.example` existe apenas para documentar que não há variável obrigatória nesta etapa.
 
-Para gravar o secret no Cloudflare, nunca no repositório:
+Na etapa futura com autenticação, grave secrets no Cloudflare, nunca no repositório:
 
 ```bash
 npx wrangler secret put SOO_MCP_API_TOKEN
@@ -157,14 +157,12 @@ Defina:
 
 ```bash
 export MCP_URL=http://localhost:8787/mcp
-export MCP_TOKEN=seu-token
 ```
 
 Inicializar:
 
 ```bash
 curl -X POST "$MCP_URL" \
-  -H "Authorization: Bearer $MCP_TOKEN" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"1.0.0"}}}'
@@ -174,7 +172,6 @@ Listar ferramentas:
 
 ```bash
 curl -X POST "$MCP_URL" \
-  -H "Authorization: Bearer $MCP_TOKEN" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
@@ -184,7 +181,6 @@ Testar sem arquivo:
 
 ```bash
 curl -X POST "$MCP_URL" \
-  -H "Authorization: Bearer $MCP_TOKEN" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"testar_recebimento_comprovante","arguments":{}}}'
@@ -196,7 +192,6 @@ Testar com arquivo em base64:
 BASE64=$(base64 -i comprovante.png)
 
 curl -X POST "$MCP_URL" \
-  -H "Authorization: Bearer $MCP_TOKEN" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"testar_recebimento_comprovante\",\"arguments\":{\"comprovante\":{\"filename\":\"comprovante.png\",\"mime_type\":\"image/png\",\"data_base64\":\"$BASE64\"}}}}"
@@ -204,17 +199,13 @@ curl -X POST "$MCP_URL" \
 
 ## Conectar ao ChatGPT para a prova
 
-Depois de publicar em uma etapa futura, cadastrar a URL:
+Cadastre a URL:
 
 ```text
 https://soo-mcp.<sua-conta>.workers.dev/mcp
 ```
 
-Cabeçalho:
-
-```text
-Authorization: Bearer <SOO_MCP_API_TOKEN>
-```
+Autenticação: selecione "Sem autenticação".
 
 Teste esperado:
 
@@ -225,23 +216,21 @@ Teste esperado:
 
 ## Publicar
 
-Não publicar antes da revisão.
-
-Quando a revisão aprovar:
+Depois de revisar:
 
 ```bash
 npm run deploy
 ```
 
-## Revogar token
+## Reativar autenticação futuramente
 
-Gere um novo token forte e atualize o secret:
+Quando a prova terminar, reative a validação de `Authorization` no Worker e grave um token forte como secret:
 
 ```bash
 npx wrangler secret put SOO_MCP_API_TOKEN
 ```
 
-Para remover:
+Para remover um token antigo:
 
 ```bash
 npx wrangler secret delete SOO_MCP_API_TOKEN
