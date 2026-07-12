@@ -4,7 +4,6 @@ import * as z from "zod/v4";
 
 type Env = {
   SOO_MCP_API_TOKEN: string;
-  SOO_OWNER_ID?: string;
 };
 
 type ComprovanteInput = {
@@ -16,27 +15,6 @@ type ComprovanteInput = {
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX_REQUESTS = 60;
-
-const CATEGORIES = [
-  "A classificar",
-  "Obra Civil / Azulejista",
-  "Demolição",
-  "Hidráulica",
-  "Elétrica",
-  "Pintura",
-  "Gesso",
-  "Piso / Vinílico",
-  "Proteção de Piso",
-  "Marcenaria",
-  "Serralheria",
-  "Vidro",
-  "Porta",
-  "Comunicação Visual",
-  "Ar-condicionado",
-  "Limpeza",
-  "Caçamba",
-  "Outros"
-];
 
 const MIME_TO_EXT: Record<string, string> = {
   "image/jpeg": "jpg",
@@ -94,44 +72,8 @@ export default {
 function createServer() {
   const server = new McpServer({
     name: "soo-mcp",
-    version: "0.2.0"
+    version: "0.3.0"
   });
-
-  server.registerTool(
-    "listar_obras",
-    {
-      title: "Listar obras",
-      description: "Temporariamente desativada nesta prova para não usar SUPABASE_SERVICE_ROLE_KEY."
-    },
-    async () => toolJson({
-      sucesso: false,
-      desativada: true,
-      motivo: "Prova de compatibilidade de anexos: nenhuma consulta ao Supabase é executada nesta etapa."
-    })
-  );
-
-  server.registerTool(
-    "buscar_contatos",
-    {
-      title: "Buscar contatos",
-      description: "Temporariamente desativada nesta prova para não usar SUPABASE_SERVICE_ROLE_KEY.",
-      inputSchema: { termo: z.string().min(1) }
-    },
-    async () => toolJson({
-      sucesso: false,
-      desativada: true,
-      motivo: "Prova de compatibilidade de anexos: nenhuma consulta ao Supabase é executada nesta etapa."
-    })
-  );
-
-  server.registerTool(
-    "listar_categorias",
-    {
-      title: "Listar categorias",
-      description: "Retorna as categorias iniciais de despesas do SOO."
-    },
-    async () => toolJson(CATEGORIES)
-  );
 
   server.registerTool(
     "testar_recebimento_comprovante",
@@ -147,46 +89,6 @@ function createServer() {
       }
     },
     async ({ comprovante }) => testarRecebimentoComprovante(comprovante)
-  );
-
-  server.registerTool(
-    "criar_despesa_com_comprovante",
-    {
-      title: "Criar despesa com comprovante",
-      description: "DESATIVADA nesta etapa. Será reativada somente após validar anexos e criar idempotency_key no banco.",
-      inputSchema: {
-        obra_id: z.string().uuid(),
-        descricao: z.string().min(1),
-        valor: z.number().nonnegative(),
-        data: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-        contato_id: z.string().uuid().optional(),
-        contato_nome: z.string().optional(),
-        quem_pagou: z.string().min(1),
-        categoria: z.string().min(1),
-        observacao: z.string().optional(),
-        idempotency_key: z.string().min(8).max(120),
-        confirmacao_usuario: z.boolean(),
-        comprovante: ComprovanteSchema
-      }
-    },
-    async () => ({
-      isError: true,
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              sucesso: false,
-              desativada: true,
-              motivo: "A criação de despesas está bloqueada nesta prova. Nenhum arquivo será gravado e nenhuma despesa será criada.",
-              proximo_passo_banco: "Criar coluna despesas.idempotency_key e restrição UNIQUE(owner_id, idempotency_key)."
-            },
-            null,
-            2
-          )
-        }
-      ]
-    })
   );
 
   return server;

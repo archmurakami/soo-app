@@ -1,4 +1,1 @@
-SUPABASE_URL=https://SEU_PROJETO.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=USAR_APENAS_NA_ETAPA_FUTURA_DE_GRAVACAO
 SOO_MCP_API_TOKEN=gere-um-token-longo-e-aleatorio
-SOO_OWNER_ID=uuid-do-usuario-administrador

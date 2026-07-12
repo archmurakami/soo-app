@@ -11,9 +11,8 @@ Esta versão é uma prova de compatibilidade de anexos entre ChatGPT e um servid
 - Endpoint MCP: `/mcp`.
 - Health check: `/health`.
 - Autenticação: `Authorization: Bearer SOO_MCP_API_TOKEN`.
-- Ferramenta ativa para a prova: `testar_recebimento_comprovante`.
-- Ferramenta `criar_despesa_com_comprovante`: registrada, mas desativada.
-- Ferramentas Supabase (`listar_obras` e `buscar_contatos`): temporariamente desativadas para esta prova.
+- Ferramenta publicada: `testar_recebimento_comprovante`.
+- Nenhuma ferramenta de Supabase ou criação de despesa é registrada nesta publicação.
 
 ## Estrutura
 
@@ -66,15 +65,12 @@ curl http://localhost:8787/health
 
 Para esta prova, apenas `SOO_MCP_API_TOKEN` é necessário para autenticar chamadas MCP.
 
-`.dev.vars.example` mantém nomes de variáveis futuras, mas `SUPABASE_SERVICE_ROLE_KEY` não é lida pelo Worker nesta etapa.
+`.dev.vars.example` contém somente o nome do token usado nesta etapa.
 
-Para produção futura, gravar secrets no Cloudflare, nunca no repositório:
+Para gravar o secret no Cloudflare, nunca no repositório:
 
 ```bash
-npx wrangler secret put SUPABASE_URL
-npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 npx wrangler secret put SOO_MCP_API_TOKEN
-npx wrangler secret put SOO_OWNER_ID
 ```
 
 ## Ferramentas MCP
@@ -120,13 +116,14 @@ Limite: 10 MB.
 
 Importante: este formato não significa que o ChatGPT preencherá `data_base64` automaticamente quando o usuário anexar uma imagem na conversa. A prova serve justamente para observar se o cliente MCP remoto encaminha algum conteúdo de anexo aos argumentos. Se nada chegar, a ferramenta retorna `recebido: false`.
 
-### criar_despesa_com_comprovante
+### Ferramentas não publicadas nesta prova
 
-Desativada nesta etapa.
+`criar_despesa_com_comprovante`, `listar_obras`, `buscar_contatos` e `listar_categorias` não são registradas nesta publicação.
 
-Enquanto a prova de anexos não for concluída, a ferramenta sempre retorna erro controlado e não:
+Enquanto a prova de anexos não for concluída, o Worker não:
 
 - lê `SUPABASE_SERVICE_ROLE_KEY`;
+- lê `SOO_OWNER_ID`;
 - envia arquivo ao Storage;
 - cria registro em `despesas`;
 - grava qualquer conteúdo.
