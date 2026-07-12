@@ -144,6 +144,7 @@ const els = {
   loginView: document.querySelector("#loginView"),
   oauthConsentView: document.querySelector("#oauthConsentView"),
   oauthClientName: document.querySelector("#oauthClientName"),
+  oauthUserEmail: document.querySelector("#oauthUserEmail"),
   oauthScopes: document.querySelector("#oauthScopes"),
   approveOAuthButton: document.querySelector("#approveOAuthButton"),
   denyOAuthButton: document.querySelector("#denyOAuthButton"),
@@ -202,7 +203,15 @@ const els = {
   printAll: document.querySelector("#printAll")
 };
 
-init();
+init().catch((error) => {
+  console.error(error);
+  showMessage(error.message || "Não foi possível iniciar o SOO.", "error");
+  if (isOAuthConsentRoute()) {
+    renderOAuthConsentShell();
+  } else {
+    showView("login");
+  }
+});
 
 async function init() {
   bindEvents();
@@ -403,21 +412,16 @@ async function loadOAuthConsent() {
     return;
   }
 
-  const oauth = supabase.auth.oauth;
-  if (!oauth?.getAuthorizationDetails || !oauth?.approveAuthorization || !oauth?.denyAuthorization) {
-    showMessage("A versão atual do Supabase Auth no navegador não expôs os métodos OAuth necessários.", "error");
-    showView("login");
-    return;
-  }
+  renderOAuthConsentShell("Carregando autorização...", ["openid", "email", "profile"]);
 
   try {
-    const { data: details, error } = await oauth.getAuthorizationDetails(authorizationId);
-    if (error) throw error;
+    const details = await getOAuthAuthorizationDetails(authorizationId);
     oauthAuthorizationDetails = details;
     renderOAuthConsent(details);
   } catch (error) {
     showMessage(error.message || "Não foi possível carregar os detalhes de autorização.", "error");
-    showView("login");
+    renderOAuthConsentShell("Não foi possível carregar o aplicativo solicitante.", ["openid", "email", "profile"]);
+    setOAuthButtonsEnabled(false);
   }
 }
 
@@ -427,43 +431,132 @@ function showOAuthLogin() {
   showMessage("Entre no SOO para autorizar a conexão com o ChatGPT.", "info");
 }
 
+function renderOAuthConsentShell(clientMessage = "ChatGPT quer acessar sua conta SOO.", scopes = []) {
+  els.userEmail.textContent = session?.user?.email || "";
+  els.sessionBar.hidden = !session?.user;
+  els.oauthClientName.textContent = clientMessage;
+  els.oauthUserEmail.textContent = session?.user?.email ? `Usuário logado: ${session.user.email}` : "Faça login para continuar.";
+  renderOAuthScopes(scopes.length ? scopes : ["openid", "email", "profile"]);
+  setOAuthButtonsEnabled(Boolean(session?.user));
+  showView("oauthConsent");
+}
+
 function renderOAuthConsent(details) {
-  const client = details?.client || details?.client_metadata || {};
+  const client = details?.client || details?.client_metadata || details?.oauth_client || {};
   const clientName = client.client_name || client.name || details?.client_name || "ChatGPT";
-  const scopes = details?.scopes || details?.scope || details?.requested_scopes || [];
-  const scopeList = Array.isArray(scopes) ? scopes : String(scopes).split(/\s+/).filter(Boolean);
+  const scopes = details?.scopes || details?.scope || details?.requested_scopes || details?.requestedScopes || [];
+  const scopeList = normalizeScopes(scopes);
 
   els.userEmail.textContent = session?.user?.email || "";
   els.sessionBar.hidden = false;
   els.oauthClientName.textContent = `${clientName} quer acessar sua conta SOO.`;
+  els.oauthUserEmail.textContent = `Usuário logado: ${session?.user?.email || "não identificado"}`;
+  renderOAuthScopes(scopeList.length ? scopeList : ["openid", "email", "profile"]);
+  setOAuthButtonsEnabled(true);
+  showView("oauthConsent");
+}
+
+function renderOAuthScopes(scopes) {
   els.oauthScopes.innerHTML = "";
-  (scopeList.length ? scopeList : ["openid", "email", "profile"]).forEach((scope) => {
+  scopes.forEach((scope) => {
     const item = document.createElement("li");
     item.textContent = scope;
     els.oauthScopes.append(item);
   });
-  showView("oauthConsent");
+}
+
+function normalizeScopes(scopes) {
+  if (Array.isArray(scopes)) return scopes.filter(Boolean);
+  return String(scopes || "").split(/\s+/).filter(Boolean);
+}
+
+function setOAuthButtonsEnabled(enabled) {
+  els.approveOAuthButton.disabled = !enabled;
+  els.denyOAuthButton.disabled = !enabled;
 }
 
 async function completeOAuthConsent(action) {
   clearMessage();
+  setOAuthButtonsEnabled(false);
   const authorizationId = getOAuthAuthorizationId();
   if (!authorizationId) {
     showMessage("Link de autorização inválido.", "error");
+    setOAuthButtonsEnabled(true);
     return;
   }
 
-  const oauth = supabase.auth.oauth;
-  const method = action === "approve" ? "approveAuthorization" : "denyAuthorization";
   try {
-    const { data, error } = await oauth[method](authorizationId);
-    if (error) throw error;
+    const data = await submitOAuthConsent(authorizationId, action);
     const redirectUrl = data?.redirect_url || data?.redirectTo || data?.url || oauthAuthorizationDetails?.redirect_url;
     if (!redirectUrl) throw new Error("Supabase não retornou redirect_url.");
     window.location.assign(redirectUrl);
   } catch (error) {
     showMessage(error.message || "Não foi possível concluir a autorização.", "error");
+    setOAuthButtonsEnabled(true);
   }
+}
+
+async function getOAuthAuthorizationDetails(authorizationId) {
+  const oauth = supabase.auth.oauth;
+  if (oauth?.getAuthorizationDetails) {
+    const { data, error } = await oauth.getAuthorizationDetails(authorizationId);
+    if (error) throw error;
+    return data;
+  }
+  return fetchOAuthAuthorizationDetails(authorizationId);
+}
+
+async function submitOAuthConsent(authorizationId, action) {
+  const oauth = supabase.auth.oauth;
+  const method = action === "approve" ? "approveAuthorization" : "denyAuthorization";
+  if (oauth?.[method]) {
+    const { data, error } = await oauth[method](authorizationId, { skipBrowserRedirect: true });
+    if (error) throw error;
+    return data;
+  }
+  return fetchOAuthConsent(authorizationId, action);
+}
+
+async function fetchOAuthAuthorizationDetails(authorizationId) {
+  const token = await getCurrentAccessToken();
+  const response = await fetch(`${supabase.supabaseUrl}/auth/v1/oauth/authorizations/${encodeURIComponent(authorizationId)}`, {
+    headers: oauthRequestHeaders(token)
+  });
+  return parseOAuthResponse(response);
+}
+
+async function fetchOAuthConsent(authorizationId, action) {
+  const token = await getCurrentAccessToken();
+  const response = await fetch(`${supabase.supabaseUrl}/auth/v1/oauth/authorizations/${encodeURIComponent(authorizationId)}/consent`, {
+    method: "POST",
+    headers: { ...oauthRequestHeaders(token), "content-type": "application/json" },
+    body: JSON.stringify({ action })
+  });
+  return parseOAuthResponse(response);
+}
+
+async function getCurrentAccessToken() {
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw error;
+  const token = data.session?.access_token;
+  if (!token) throw new Error("Sessão expirada. Entre novamente para continuar.");
+  return token;
+}
+
+function oauthRequestHeaders(token) {
+  return {
+    apikey: supabase.supabaseKey,
+    authorization: `Bearer ${token}`,
+    accept: "application/json"
+  };
+}
+
+async function parseOAuthResponse(response) {
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(payload?.msg || payload?.message || payload?.error_description || payload?.error || `Supabase retornou ${response.status}`);
+  }
+  return payload;
 }
 
 async function loadHome() {
