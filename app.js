@@ -115,6 +115,9 @@ let despesas = [];
 let currentObra = null;
 let activeDespesaFilter = "todas";
 let activeMeetingTopic = topics[0].id;
+let currentView = "login";
+let handledInitialSession = false;
+let homeLoadPromise = null;
 
 const els = {
   messageArea: document.querySelector("#messageArea"),
@@ -172,22 +175,65 @@ async function init() {
     return;
   }
 
+  supabase.auth.onAuthStateChange(handleAuthStateChange);
+
   const { data } = await supabase.auth.getSession();
-  session = data.session;
-  supabase.auth.onAuthStateChange((_event, nextSession) => {
-    session = nextSession;
+  if (!handledInitialSession) {
+    handledInitialSession = true;
+    session = data.session;
     if (session) {
-      loadHome();
+      await loadHomeOnce();
     } else {
       showView("login");
     }
-  });
-
-  if (session) {
-    await loadHome();
-  } else {
-    showView("login");
   }
+}
+
+function handleAuthStateChange(event, nextSession) {
+  session = nextSession;
+
+  if (event === "INITIAL_SESSION") {
+    if (handledInitialSession) return;
+    handledInitialSession = true;
+    if (session) {
+      loadHomeOnce();
+    } else {
+      showView("login");
+    }
+    return;
+  }
+
+  if (event === "SIGNED_IN") {
+    if (!session) {
+      showView("login");
+      return;
+    }
+    if (currentView === "login") {
+      loadHomeOnce();
+    }
+    return;
+  }
+
+  if (event === "SIGNED_OUT") {
+    currentObra = null;
+    contatos = [];
+    despesas = [];
+    showView("login");
+    return;
+  }
+
+  if (event === "TOKEN_REFRESHED" || event === "USER_UPDATED") {
+    return;
+  }
+}
+
+async function loadHomeOnce() {
+  if (!homeLoadPromise) {
+    homeLoadPromise = loadHome().finally(() => {
+      homeLoadPromise = null;
+    });
+  }
+  return homeLoadPromise;
 }
 
 function bindEvents() {
@@ -649,6 +695,7 @@ function getTopicState(state, topicId) {
 }
 
 function showView(view) {
+  currentView = view;
   els.loginView.hidden = view !== "login";
   els.obrasView.hidden = view !== "obras";
   els.obraDetailView.hidden = view !== "obra";
