@@ -50,6 +50,22 @@
         </div>
       </section>
 
+      <section id="oauthConsentView" class="auth-view" hidden>
+        <div class="auth-panel consent-panel">
+          <p class="eyebrow">Autorização</p>
+          <h1>Conectar ao SOO</h1>
+          <p id="oauthClientName"></p>
+          <div>
+            <h2>Permissões solicitadas</h2>
+            <ul id="oauthScopes" class="scope-list"></ul>
+          </div>
+          <div class="actions">
+            <button id="denyOAuthButton" class="button secondary" type="button">Negar</button>
+            <button id="approveOAuthButton" class="button primary" type="button">Autorizar</button>
+          </div>
+        </div>
+      </section>
+
       <section id="obrasView" class="workspace" hidden>
         <div class="topbar">
           <div>

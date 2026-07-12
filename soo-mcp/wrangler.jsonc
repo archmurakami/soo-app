@@ -4,6 +4,10 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-07-12",
   "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "SUPABASE_URL": "https://nlfzjmruzmstrysuohxl.supabase.co",
+    "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_B_P4_y-EyZrFur9QQHLe2A_fSNmoLhy"
+  },
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1

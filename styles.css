@@ -145,6 +145,20 @@ main {
   color: var(--muted);
 }
 
+.consent-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.scope-list {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding-left: 22px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
 .topbar,
 .meetings-head,
 .list-toolbar {

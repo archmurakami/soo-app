@@ -126,6 +126,7 @@ let currentView = "login";
 let handledInitialSession = false;
 let homeLoadPromise = null;
 let editingDespesa = null;
+let oauthAuthorizationDetails = null;
 let comprovanteState = {
   file: null,
   path: null,
@@ -141,6 +142,11 @@ let comprovanteUploadSeq = 0;
 const els = {
   messageArea: document.querySelector("#messageArea"),
   loginView: document.querySelector("#loginView"),
+  oauthConsentView: document.querySelector("#oauthConsentView"),
+  oauthClientName: document.querySelector("#oauthClientName"),
+  oauthScopes: document.querySelector("#oauthScopes"),
+  approveOAuthButton: document.querySelector("#approveOAuthButton"),
+  denyOAuthButton: document.querySelector("#denyOAuthButton"),
   obrasView: document.querySelector("#obrasView"),
   obraDetailView: document.querySelector("#obraDetailView"),
   loginForm: document.querySelector("#loginForm"),
@@ -214,7 +220,9 @@ async function init() {
   if (!handledInitialSession) {
     handledInitialSession = true;
     session = data.session;
-    if (session) {
+    if (isOAuthConsentRoute()) {
+      await loadOAuthConsent();
+    } else if (session) {
       await loadHomeOnce();
     } else {
       showView("login");
@@ -228,7 +236,9 @@ function handleAuthStateChange(event, nextSession) {
   if (event === "INITIAL_SESSION") {
     if (handledInitialSession) return;
     handledInitialSession = true;
-    if (session) {
+    if (isOAuthConsentRoute()) {
+      loadOAuthConsent();
+    } else if (session) {
       loadHomeOnce();
     } else {
       showView("login");
@@ -241,6 +251,10 @@ function handleAuthStateChange(event, nextSession) {
       showView("login");
       return;
     }
+    if (isOAuthConsentRoute()) {
+      loadOAuthConsent();
+      return;
+    }
     if (currentView === "login") {
       loadHomeOnce();
     }
@@ -251,6 +265,10 @@ function handleAuthStateChange(event, nextSession) {
     currentObra = null;
     contatos = [];
     despesas = [];
+    if (isOAuthConsentRoute()) {
+      showOAuthLogin();
+      return;
+    }
     showView("login");
     return;
   }
@@ -272,6 +290,8 @@ async function loadHomeOnce() {
 function bindEvents() {
   els.loginForm.addEventListener("submit", handleLogin);
   els.logoutButton.addEventListener("click", () => supabase.auth.signOut());
+  els.approveOAuthButton.addEventListener("click", () => completeOAuthConsent("approve"));
+  els.denyOAuthButton.addEventListener("click", () => completeOAuthConsent("deny"));
   els.newObraButton.addEventListener("click", () => toggleForm(els.obraForm, true));
   els.obraForm.addEventListener("submit", handleCreateObra);
   els.backToObras.addEventListener("click", () => loadHome());
@@ -350,6 +370,99 @@ async function handleLogin(event) {
     showMessage("Login realizado com sucesso.", "success");
   } catch (error) {
     showMessage("Email ou senha incorretos. Verifique os dados e tente novamente.", "error");
+  }
+}
+
+function isOAuthConsentRoute() {
+  return window.location.pathname === "/oauth/consent";
+}
+
+function getOAuthAuthorizationId() {
+  return new URLSearchParams(window.location.search).get("authorization_id");
+}
+
+async function loadOAuthConsent() {
+  clearMessage();
+  if (!supabase) {
+    showMessage("Configure SUPABASE_URL e SUPABASE_PUBLISHABLE_KEY antes de autorizar o conector.", "warning");
+    showView("login");
+    return;
+  }
+
+  const authorizationId = getOAuthAuthorizationId();
+  if (!authorizationId) {
+    showMessage("Link de autorização inválido: authorization_id ausente.", "error");
+    showView("login");
+    return;
+  }
+
+  const { data } = await supabase.auth.getSession();
+  session = data.session;
+  if (!session?.user) {
+    showOAuthLogin();
+    return;
+  }
+
+  const oauth = supabase.auth.oauth;
+  if (!oauth?.getAuthorizationDetails || !oauth?.approveAuthorization || !oauth?.denyAuthorization) {
+    showMessage("A versão atual do Supabase Auth no navegador não expôs os métodos OAuth necessários.", "error");
+    showView("login");
+    return;
+  }
+
+  try {
+    const { data: details, error } = await oauth.getAuthorizationDetails(authorizationId);
+    if (error) throw error;
+    oauthAuthorizationDetails = details;
+    renderOAuthConsent(details);
+  } catch (error) {
+    showMessage(error.message || "Não foi possível carregar os detalhes de autorização.", "error");
+    showView("login");
+  }
+}
+
+function showOAuthLogin() {
+  showView("login");
+  els.sessionBar.hidden = true;
+  showMessage("Entre no SOO para autorizar a conexão com o ChatGPT.", "info");
+}
+
+function renderOAuthConsent(details) {
+  const client = details?.client || details?.client_metadata || {};
+  const clientName = client.client_name || client.name || details?.client_name || "ChatGPT";
+  const scopes = details?.scopes || details?.scope || details?.requested_scopes || [];
+  const scopeList = Array.isArray(scopes) ? scopes : String(scopes).split(/\s+/).filter(Boolean);
+
+  els.userEmail.textContent = session?.user?.email || "";
+  els.sessionBar.hidden = false;
+  els.oauthClientName.textContent = `${clientName} quer acessar sua conta SOO.`;
+  els.oauthScopes.innerHTML = "";
+  (scopeList.length ? scopeList : ["openid", "email", "profile"]).forEach((scope) => {
+    const item = document.createElement("li");
+    item.textContent = scope;
+    els.oauthScopes.append(item);
+  });
+  showView("oauthConsent");
+}
+
+async function completeOAuthConsent(action) {
+  clearMessage();
+  const authorizationId = getOAuthAuthorizationId();
+  if (!authorizationId) {
+    showMessage("Link de autorização inválido.", "error");
+    return;
+  }
+
+  const oauth = supabase.auth.oauth;
+  const method = action === "approve" ? "approveAuthorization" : "denyAuthorization";
+  try {
+    const { data, error } = await oauth[method](authorizationId);
+    if (error) throw error;
+    const redirectUrl = data?.redirect_url || data?.redirectTo || data?.url || oauthAuthorizationDetails?.redirect_url;
+    if (!redirectUrl) throw new Error("Supabase não retornou redirect_url.");
+    window.location.assign(redirectUrl);
+  } catch (error) {
+    showMessage(error.message || "Não foi possível concluir a autorização.", "error");
   }
 }
 
@@ -990,6 +1103,7 @@ function getTopicState(state, topicId) {
 function showView(view) {
   currentView = view;
   els.loginView.hidden = view !== "login";
+  els.oauthConsentView.hidden = view !== "oauthConsent";
   els.obrasView.hidden = view !== "obras";
   els.obraDetailView.hidden = view !== "obra";
   els.sessionBar.hidden = view === "login";
