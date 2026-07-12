@@ -4,7 +4,12 @@ MVP funcional do SOO conectado ao Supabase, com app único multiobras, autentica
 
 ## Configurar Supabase
 
-Abra `js/supabase-client.js` e preencha:
+O projeto SOO ja esta conectado em `js/supabase-client.js` com:
+
+- `SUPABASE_URL`
+- `SUPABASE_PUBLISHABLE_KEY`
+
+Para trocar de projeto no futuro, edite o mesmo arquivo:
 
 ```js
 export const SUPABASE_URL = "https://SEU_PROJETO.supabase.co";

@@ -1,7 +1,7 @@
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
-export const SUPABASE_URL = "INSIRA_SUPABASE_URL_AQUI";
-export const SUPABASE_PUBLISHABLE_KEY = "INSIRA_SUPABASE_PUBLISHABLE_KEY_AQUI";
+export const SUPABASE_URL = "https://nlfzjmruzmstrysuohxl.supabase.co";
+export const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_B_P4_y-EyZrFur9QQHLe2A_fSNmoLhy";
 
 const configuredUrl = window.SOO_SUPABASE_URL || SUPABASE_URL;
 const configuredKey = window.SOO_SUPABASE_PUBLISHABLE_KEY || SUPABASE_PUBLISHABLE_KEY;
