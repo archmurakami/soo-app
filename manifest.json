@@ -1,0 +1,25 @@
+{
+  "name": "SOO - Sistema Operacional de Obras",
+  "short_name": "SOO",
+  "description": "MVP multiobras do Sistema Operacional de Obras.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#eef2f0",
+  "theme_color": "#11382d",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "icons/icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

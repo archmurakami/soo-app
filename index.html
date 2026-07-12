@@ -2,13 +2,19 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SOO - Obra Rose</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#11382d">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="SOO">
+  <title>SOO</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icons/icon-192.svg">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div class="app-shell">
-    <aside class="sidebar" aria-label="Tópicos da reunião">
+  <div id="app" class="app-shell">
+    <header class="app-header">
       <div class="brand">
         <svg viewBox="0 0 64 64" role="img" aria-label="SOO" class="brand-mark">
           <rect x="8" y="10" width="48" height="44" rx="5"></rect>
@@ -20,93 +26,252 @@
           <span>Sistema Operacional de Obras</span>
         </div>
       </div>
-      <nav id="topicTabs" class="tabs"></nav>
-    </aside>
+      <div id="sessionBar" class="session-bar" hidden>
+        <span id="userEmail"></span>
+        <button id="logoutButton" class="button ghost" type="button">Sair</button>
+      </div>
+    </header>
 
-    <main class="main">
-      <header class="topbar">
-        <div>
-          <p class="eyebrow">Obra Rose</p>
-          <h1 id="sectionTitle">Reunião Pedreiro/Azulejista</h1>
+    <main>
+      <section id="messageArea" class="message-area" aria-live="polite"></section>
+
+      <section id="loginView" class="auth-view" hidden>
+        <div class="auth-panel">
+          <p class="eyebrow">Acesso seguro</p>
+          <h1>Entrar no SOO</h1>
+          <p>Informe seu e-mail para receber um link de acesso. Sua sessão fica salva neste aparelho.</p>
+          <form id="loginForm" class="stack-form">
+            <label>E-mail
+              <input id="loginEmail" type="email" autocomplete="email" required placeholder="voce@email.com">
+            </label>
+            <button class="button primary" type="submit">Enviar link de acesso</button>
+          </form>
         </div>
-        <div class="actions">
-          <button id="clearSection" class="button secondary" type="button" title="Limpar tópico atual">Limpar tópico</button>
-          <button id="exportPdf" class="button primary" type="button" title="Exportar reunião em PDF">Exportar PDF</button>
-        </div>
-      </header>
-
-      <section class="sheet screen-sheet">
-        <form id="meetingForm" autocomplete="off">
-          <section class="field-band" aria-labelledby="dadosReuniao">
-            <h2 id="dadosReuniao">Tela inicial da reunião</h2>
-            <div class="form-grid">
-              <label>Obra
-                <input data-store="meta.obra" type="text" value="Apartamento Rose">
-              </label>
-              <label>Tipo de reunião
-                <input data-store="meta.tipo" type="text" value="Pedreiro / Azulejista">
-              </label>
-              <label>Data
-                <input data-store="meta.data" type="date">
-              </label>
-              <label class="span-2">Participantes
-                <textarea data-store="meta.participantes" rows="2" placeholder="Liste os participantes da reunião"></textarea>
-              </label>
-              <label class="span-2">Objetivo da reunião
-                <textarea data-store="meta.objetivo" rows="3">Definir soluções técnicas para revestimento da cozinha, proteção das portas laqueadas, piso e drenagem do terraço, nicho da adega e localização dos pontos da banheira.</textarea>
-              </label>
-            </div>
-          </section>
-
-          <section class="checklist-section">
-            <div class="section-head">
-              <div>
-                <h2 id="checklistHeading">Cozinha - revestimento sobre revestimento</h2>
-                <p id="checklistHint">Validação técnica do assentamento sobre o revestimento existente.</p>
-              </div>
-              <span id="completionBadge" class="badge">0/0</span>
-            </div>
-
-            <div class="table-wrap">
-              <table class="checklist-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Item</th>
-                    <th scope="col">Sim</th>
-                    <th scope="col">Não</th>
-                    <th scope="col">N.A.</th>
-                    <th scope="col">Observações</th>
-                  </tr>
-                </thead>
-                <tbody id="checklistBody"></tbody>
-              </table>
-            </div>
-          </section>
-
-          <section class="notes-grid topic-notes" aria-label="Fechamento do tópico">
-            <label>Decisão final
-              <textarea data-section-field="decisaoFinal" rows="3" placeholder="Solução aprovada para este tópico"></textarea>
-            </label>
-            <label>Pendência
-              <textarea data-section-field="pendencia" rows="3" placeholder="Pendência aberta, se houver"></textarea>
-            </label>
-            <label>Responsável
-              <input data-section-field="responsavel" type="text" placeholder="Responsável pelo encaminhamento">
-            </label>
-            <label>Prazo
-              <input data-section-field="prazo" type="text" placeholder="Data ou prazo combinado">
-            </label>
-            <label class="span-2">Fotos necessárias
-              <textarea data-section-field="fotosNecessarias" rows="3" placeholder="Fotos antes, durante ou depois da execução"></textarea>
-            </label>
-          </section>
-        </form>
       </section>
 
-      <section id="printAll" class="print-all" aria-label="Versão para PDF"></section>
+      <section id="obrasView" class="workspace" hidden>
+        <div class="topbar">
+          <div>
+            <p class="eyebrow">Minhas obras</p>
+            <h1>Obras</h1>
+          </div>
+          <button id="newObraButton" class="button primary" type="button">+ Nova obra</button>
+        </div>
+        <form id="obraForm" class="panel form-panel" hidden>
+          <h2>Nova obra</h2>
+          <div class="form-grid">
+            <label>Nome
+              <input name="nome" required>
+            </label>
+            <label>Cliente
+              <input name="cliente">
+            </label>
+            <label>Cidade
+              <input name="cidade">
+            </label>
+            <label>Data de início
+              <input name="data_inicio" type="date">
+            </label>
+            <label>Status
+              <select name="status">
+                <option value="ativa">Ativa</option>
+                <option value="planejamento">Planejamento</option>
+                <option value="pausada">Pausada</option>
+                <option value="finalizada">Finalizada</option>
+              </select>
+            </label>
+          </div>
+          <div class="actions">
+            <button class="button secondary" type="button" data-close-form="obraForm">Cancelar</button>
+            <button class="button primary" type="submit">Salvar obra</button>
+          </div>
+        </form>
+        <div id="obrasList" class="cards-grid"></div>
+      </section>
+
+      <section id="obraDetailView" class="workspace" hidden>
+        <button id="backToObras" class="button secondary back-button" type="button">Voltar para obras</button>
+        <div class="topbar">
+          <div>
+            <p id="obraMeta" class="eyebrow"></p>
+            <h1 id="obraTitle"></h1>
+          </div>
+          <button id="newDespesaButton" class="button primary" type="button">+ Nova despesa</button>
+        </div>
+
+        <div class="metrics-grid">
+          <article class="metric">
+            <span>Total de despesas</span>
+            <strong id="totalDespesas">R$ 0,00</strong>
+          </article>
+          <article class="metric">
+            <span>Despesas a classificar</span>
+            <strong id="despesasAClassificar">0</strong>
+          </article>
+        </div>
+
+        <nav class="section-tabs" aria-label="Secoes da obra">
+          <button class="section-tab active" data-section="despesas" type="button">Despesas</button>
+          <button class="section-tab" data-section="reunioes" type="button">Reuniões</button>
+        </nav>
+
+        <section id="despesasSection">
+          <form id="despesaForm" class="panel form-panel" hidden>
+            <h2>Nova despesa</h2>
+            <div class="form-grid">
+              <label>Obra
+                <input id="despesaObraNome" disabled>
+              </label>
+              <label>Descrição
+                <input name="descricao" required>
+              </label>
+              <label>Valor
+                <input name="valor" type="number" min="0" step="0.01" inputmode="decimal" required>
+              </label>
+              <label>Data
+                <input name="data" type="date" required>
+              </label>
+              <label>Contato
+                <input id="contatoSearch" list="contatosOptions" autocomplete="off" placeholder="Pesquisar contato">
+                <datalist id="contatosOptions"></datalist>
+              </label>
+              <label>Quem pagou
+                <input name="quem_pagou">
+              </label>
+              <label>Categoria
+                <input name="categoria" list="categoriasOptions" value="A classificar">
+                <datalist id="categoriasOptions">
+                  <option value="A classificar"></option>
+                  <option value="Material"></option>
+                  <option value="Mao de obra"></option>
+                  <option value="Transporte"></option>
+                  <option value="Projeto"></option>
+                  <option value="Taxas"></option>
+                </datalist>
+              </label>
+              <label>Comprovante
+                <input name="comprovante" type="file" accept="image/*,.pdf">
+              </label>
+              <label class="span-2">Observação
+                <textarea name="observacao" rows="3"></textarea>
+              </label>
+            </div>
+
+            <div id="quickContactPanel" class="quick-contact" hidden>
+              <h3>Cadastro rapido de contato</h3>
+              <div class="form-grid">
+                <label>Nome
+                  <input id="quickContatoNome">
+                </label>
+                <label>Tipo
+                  <select id="quickContatoTipo">
+                    <option value="Prestador">Prestador</option>
+                    <option value="Fornecedor">Fornecedor</option>
+                    <option value="Cliente">Cliente</option>
+                    <option value="Colaborador">Colaborador</option>
+                  </select>
+                </label>
+                <label>Telefone
+                  <input id="quickContatoTelefone">
+                </label>
+                <label>E-mail
+                  <input id="quickContatoEmail" type="email">
+                </label>
+              </div>
+              <button id="saveQuickContact" class="button secondary" type="button">Salvar contato e continuar</button>
+            </div>
+
+            <div class="actions">
+              <button class="button secondary" type="button" data-close-form="despesaForm">Cancelar</button>
+              <button class="button primary" type="submit">Salvar despesa</button>
+            </div>
+          </form>
+
+          <div class="list-toolbar">
+            <h2>Despesas recentes</h2>
+            <div class="filter-group" role="group" aria-label="Filtros de despesas">
+              <button class="filter active" data-filter="todas" type="button">Todas</button>
+              <button class="filter" data-filter="a_classificar" type="button">A classificar</button>
+              <button class="filter" data-filter="sem_comprovante" type="button">Sem comprovante</button>
+            </div>
+          </div>
+          <div id="despesasList" class="expense-list"></div>
+        </section>
+
+        <section id="reunioesSection" hidden>
+          <div class="panel meetings-panel">
+            <div class="meetings-head">
+              <div>
+                <p class="eyebrow">Reuniões</p>
+                <h2 id="meetingSectionTitle">Checklist da obra</h2>
+              </div>
+              <div class="actions">
+                <button id="clearSection" class="button secondary" type="button">Limpar topico</button>
+                <button id="exportPdf" class="button primary" type="button">Exportar PDF</button>
+              </div>
+            </div>
+            <nav id="topicTabs" class="meeting-tabs"></nav>
+            <form id="meetingForm" autocomplete="off">
+              <div class="form-grid">
+                <label>Tipo de reunião
+                  <input data-store="meta.tipo" type="text" value="Pedreiro / Azulejista">
+                </label>
+                <label>Data
+                  <input data-store="meta.data" type="date">
+                </label>
+                <label class="span-2">Participantes
+                  <textarea data-store="meta.participantes" rows="2"></textarea>
+                </label>
+                <label class="span-2">Objetivo da reunião
+                  <textarea data-store="meta.objetivo" rows="3"></textarea>
+                </label>
+              </div>
+
+              <div class="section-head">
+                <div>
+                  <h3 id="checklistHeading"></h3>
+                  <p id="checklistHint"></p>
+                </div>
+                <span id="completionBadge" class="badge">0/0</span>
+              </div>
+              <div class="table-wrap">
+                <table class="checklist-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Item</th>
+                      <th scope="col">Sim</th>
+                      <th scope="col">Não</th>
+                      <th scope="col">N.A.</th>
+                      <th scope="col">Observações</th>
+                    </tr>
+                  </thead>
+                  <tbody id="checklistBody"></tbody>
+                </table>
+              </div>
+              <div class="notes-grid">
+                <label>Decisão final
+                  <textarea data-section-field="decisaoFinal" rows="3"></textarea>
+                </label>
+                <label>Pendência
+                  <textarea data-section-field="pendencia" rows="3"></textarea>
+                </label>
+                <label>Responsável
+                  <input data-section-field="responsavel" type="text">
+                </label>
+                <label>Prazo
+                  <input data-section-field="prazo" type="text">
+                </label>
+                <label class="span-2">Fotos necessárias
+                  <textarea data-section-field="fotosNecessarias" rows="3"></textarea>
+                </label>
+              </div>
+            </form>
+          </div>
+          <section id="printAll" class="print-all" aria-label="Versao para PDF"></section>
+        </section>
+      </section>
     </main>
   </div>
-
-  <script src="app.js"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>
