@@ -1,16 +1,16 @@
-const CACHE_NAME = "soo-mvp-v8";
+const CACHE_NAME = "soo-mvp-v9";
 const APP_SHELL = [
-  "./",
-  "./index.html",
-  "./styles.css",
-  "./app.js",
-  "./manifest.json",
-  "./js/supabase-client.js",
-  "./js/obras-service.js",
-  "./js/contatos-service.js",
-  "./js/despesas-service.js",
-  "./icons/icon-192.svg",
-  "./icons/icon-512.svg"
+  "/",
+  "/index.html",
+  "/styles.css",
+  "/app.js",
+  "/manifest.json",
+  "/js/supabase-client.js",
+  "/js/obras-service.js",
+  "/js/contatos-service.js",
+  "/js/despesas-service.js",
+  "/icons/icon-192.svg",
+  "/icons/icon-512.svg"
 ];
 
 self.addEventListener("install", (event) => {
@@ -29,6 +29,14 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+
+  if (event.request.mode === "navigate") {
+    event.respondWith(
+      fetch("/index.html").catch(() => caches.match("/index.html"))
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request).then((cached) => cached || fetch(event.request))
   );
