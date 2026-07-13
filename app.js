@@ -127,6 +127,7 @@ let handledInitialSession = false;
 let homeLoadPromise = null;
 let editingDespesa = null;
 let oauthAuthorizationDetails = null;
+let oauthFlowInProgress = false;
 let comprovanteState = {
   file: null,
   path: null,
@@ -405,6 +406,14 @@ async function loadOAuthConsent() {
     return;
   }
 
+  const cachedRedirectUrl = getProcessedOAuthRedirectUrl(authorizationId);
+  if (cachedRedirectUrl) {
+    window.location.assign(cachedRedirectUrl);
+    return;
+  }
+
+  if (oauthFlowInProgress) return;
+
   const { data } = await supabase.auth.getSession();
   session = data.session;
   if (!session?.user) {
@@ -412,16 +421,31 @@ async function loadOAuthConsent() {
     return;
   }
 
-  renderOAuthConsentShell("Carregando autorização...", ["openid", "email", "profile"]);
-
+  oauthFlowInProgress = true;
+  let redirecting = false;
   try {
     const details = await getOAuthAuthorizationDetails(authorizationId);
     oauthAuthorizationDetails = details;
+    const redirectUrl = getOAuthRedirectUrl(details);
+    if (details?.auto_approved && redirectUrl) {
+      rememberProcessedOAuthRedirectUrl(authorizationId, redirectUrl);
+      redirecting = true;
+      window.location.assign(redirectUrl);
+      return;
+    }
     renderOAuthConsent(details);
   } catch (error) {
+    const redirectUrl = getProcessedOAuthRedirectUrl(authorizationId);
+    if (redirectUrl) {
+      redirecting = true;
+      window.location.assign(redirectUrl);
+      return;
+    }
     showMessage(error.message || "Não foi possível carregar os detalhes de autorização.", "error");
     renderOAuthConsentShell("Não foi possível carregar o aplicativo solicitante.", ["openid", "email", "profile"]);
     setOAuthButtonsEnabled(false);
+  } finally {
+    if (!redirecting) oauthFlowInProgress = false;
   }
 }
 
@@ -477,23 +501,52 @@ function setOAuthButtonsEnabled(enabled) {
 
 async function completeOAuthConsent(action) {
   clearMessage();
+  if (oauthFlowInProgress) return;
+  oauthFlowInProgress = true;
   setOAuthButtonsEnabled(false);
   const authorizationId = getOAuthAuthorizationId();
   if (!authorizationId) {
     showMessage("Link de autorização inválido.", "error");
     setOAuthButtonsEnabled(true);
+    oauthFlowInProgress = false;
     return;
   }
 
   try {
     const data = await submitOAuthConsent(authorizationId, action);
-    const redirectUrl = data?.redirect_url || data?.redirectTo || data?.url || oauthAuthorizationDetails?.redirect_url;
+    const redirectUrl = getOAuthRedirectUrl(data) || getOAuthRedirectUrl(oauthAuthorizationDetails);
     if (!redirectUrl) throw new Error("Supabase não retornou redirect_url.");
+    rememberProcessedOAuthRedirectUrl(authorizationId, redirectUrl);
     window.location.assign(redirectUrl);
   } catch (error) {
     showMessage(error.message || "Não foi possível concluir a autorização.", "error");
     setOAuthButtonsEnabled(true);
+    oauthFlowInProgress = false;
   }
+}
+
+function getOAuthRedirectUrl(data) {
+  return data?.redirect_url || data?.redirectTo || data?.redirect_uri || data?.url || "";
+}
+
+function getProcessedOAuthRedirectUrl(authorizationId) {
+  try {
+    return sessionStorage.getItem(oauthRedirectStorageKey(authorizationId)) || "";
+  } catch {
+    return "";
+  }
+}
+
+function rememberProcessedOAuthRedirectUrl(authorizationId, redirectUrl) {
+  try {
+    sessionStorage.setItem(oauthRedirectStorageKey(authorizationId), redirectUrl);
+  } catch {
+    // Best-effort guard against duplicate OAuth processing after reloads.
+  }
+}
+
+function oauthRedirectStorageKey(authorizationId) {
+  return `soo.oauth.redirect.${authorizationId}`;
 }
 
 async function getOAuthAuthorizationDetails(authorizationId) {
