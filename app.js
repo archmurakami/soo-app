@@ -1256,6 +1256,9 @@ function setByPath(target, path, value) {
 
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+    navigator.serviceWorker
+      .register("/service-worker.js")
+      .then((registration) => navigator.serviceWorker.ready.then(() => registration.unregister()))
+      .catch(() => {});
   }
 }
