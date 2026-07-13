@@ -128,6 +128,12 @@ let homeLoadPromise = null;
 let editingDespesa = null;
 let oauthAuthorizationDetails = null;
 let oauthFlowInProgress = false;
+let oauthBootstrapStarted = false;
+let oauthDetailsRequested = false;
+let oauthRedirectStarted = false;
+let oauthLoginSubmitted = false;
+let oauthDetailsRequestCount = 0;
+const oauthLoadPromises = new Map();
 let comprovanteState = {
   file: null,
   path: null,
@@ -247,7 +253,7 @@ function handleAuthStateChange(event, nextSession) {
     if (handledInitialSession) return;
     handledInitialSession = true;
     if (isOAuthConsentRoute()) {
-      loadOAuthConsent();
+      return;
     } else if (session) {
       loadHomeOnce();
     } else {
@@ -262,7 +268,10 @@ function handleAuthStateChange(event, nextSession) {
       return;
     }
     if (isOAuthConsentRoute()) {
-      loadOAuthConsent();
+      if (oauthBootstrapStarted && oauthLoginSubmitted && !oauthDetailsRequested && !oauthRedirectStarted) {
+        oauthLoginSubmitted = false;
+        loadOAuthConsent();
+      }
       return;
     }
     if (currentView === "login") {
@@ -375,10 +384,12 @@ async function handleLogin(event) {
   const email = els.loginEmail.value.trim();
   const password = els.loginPassword.value;
   try {
+    if (isOAuthConsentRoute()) oauthLoginSubmitted = true;
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
     showMessage("Login realizado com sucesso.", "success");
   } catch (error) {
+    oauthLoginSubmitted = false;
     showMessage("Email ou senha incorretos. Verifique os dados e tente novamente.", "error");
   }
 }
@@ -393,6 +404,7 @@ function getOAuthAuthorizationId() {
 
 async function loadOAuthConsent() {
   clearMessage();
+  oauthBootstrapStarted = true;
   if (!supabase) {
     showMessage("Configure SUPABASE_URL e SUPABASE_PUBLISHABLE_KEY antes de autorizar o conector.", "warning");
     showView("login");
@@ -408,8 +420,13 @@ async function loadOAuthConsent() {
 
   const cachedRedirectUrl = getProcessedOAuthRedirectUrl(authorizationId);
   if (cachedRedirectUrl) {
-    window.location.assign(cachedRedirectUrl);
+    oauthRedirectStarted = true;
+    window.location.replace(cachedRedirectUrl);
     return;
+  }
+
+  if (oauthLoadPromises.has(authorizationId)) {
+    return oauthLoadPromises.get(authorizationId);
   }
 
   if (oauthFlowInProgress) return;
@@ -421,16 +438,28 @@ async function loadOAuthConsent() {
     return;
   }
 
+  const loadPromise = loadOAuthConsentDetailsOnce(authorizationId);
+  oauthLoadPromises.set(authorizationId, loadPromise);
+  return loadPromise;
+}
+
+async function loadOAuthConsentDetailsOnce(authorizationId) {
   oauthFlowInProgress = true;
   let redirecting = false;
   try {
-    const details = await getOAuthAuthorizationDetails(authorizationId);
+    const details = await fetchOAuthAuthorizationDetails(authorizationId);
     oauthAuthorizationDetails = details;
-    const redirectUrl = getOAuthRedirectUrl(details);
-    if (details?.auto_approved && redirectUrl) {
-      rememberProcessedOAuthRedirectUrl(authorizationId, redirectUrl);
+    const redirectInfo = getOAuthRedirectInfo(details);
+    logOAuthDebug("authorization details received", {
+      authorization_id: authorizationId,
+      auto_approved: details?.auto_approved === true,
+      redirect_field: redirectInfo.field || null
+    });
+    if (details?.auto_approved === true && redirectInfo.url) {
+      rememberProcessedOAuthRedirectUrl(authorizationId, redirectInfo.url);
+      oauthRedirectStarted = true;
       redirecting = true;
-      window.location.assign(redirectUrl);
+      window.location.replace(redirectInfo.url);
       return;
     }
     renderOAuthConsent(details);
@@ -438,7 +467,14 @@ async function loadOAuthConsent() {
     const redirectUrl = getProcessedOAuthRedirectUrl(authorizationId);
     if (redirectUrl) {
       redirecting = true;
-      window.location.assign(redirectUrl);
+      oauthRedirectStarted = true;
+      window.location.replace(redirectUrl);
+      return;
+    }
+    if (error.status === 400) {
+      showMessage("Esta solicitação já foi processada. Feche esta aba e conecte novamente pelo ChatGPT.", "error");
+      setOAuthButtonsVisible(false);
+      showView("oauthConsent");
       return;
     }
     showMessage(error.message || "Não foi possível carregar os detalhes de autorização.", "error");
@@ -476,6 +512,7 @@ function renderOAuthConsent(details) {
   els.oauthClientName.textContent = `${clientName} quer acessar sua conta SOO.`;
   els.oauthUserEmail.textContent = `Usuário logado: ${session?.user?.email || "não identificado"}`;
   renderOAuthScopes(scopeList.length ? scopeList : ["openid", "email", "profile"]);
+  setOAuthButtonsVisible(true);
   setOAuthButtonsEnabled(true);
   showView("oauthConsent");
 }
@@ -499,6 +536,11 @@ function setOAuthButtonsEnabled(enabled) {
   els.denyOAuthButton.disabled = !enabled;
 }
 
+function setOAuthButtonsVisible(visible) {
+  els.approveOAuthButton.hidden = !visible;
+  els.denyOAuthButton.hidden = !visible;
+}
+
 async function completeOAuthConsent(action) {
   clearMessage();
   if (oauthFlowInProgress) return;
@@ -517,7 +559,8 @@ async function completeOAuthConsent(action) {
     const redirectUrl = getOAuthRedirectUrl(data) || getOAuthRedirectUrl(oauthAuthorizationDetails);
     if (!redirectUrl) throw new Error("Supabase não retornou redirect_url.");
     rememberProcessedOAuthRedirectUrl(authorizationId, redirectUrl);
-    window.location.assign(redirectUrl);
+    oauthRedirectStarted = true;
+    window.location.replace(redirectUrl);
   } catch (error) {
     showMessage(error.message || "Não foi possível concluir a autorização.", "error");
     setOAuthButtonsEnabled(true);
@@ -526,7 +569,22 @@ async function completeOAuthConsent(action) {
 }
 
 function getOAuthRedirectUrl(data) {
-  return data?.redirect_url || data?.redirectTo || data?.redirect_uri || data?.url || "";
+  return getOAuthRedirectInfo(data).url;
+}
+
+function getOAuthRedirectInfo(data) {
+  const directFields = ["redirect_url", "redirectTo", "redirect_uri", "redirect_to", "url"];
+  for (const field of directFields) {
+    if (typeof data?.[field] === "string" && data[field]) {
+      return { field, url: data[field] };
+    }
+  }
+  for (const [field, value] of Object.entries(data || {})) {
+    if (field.toLowerCase().includes("redirect") && typeof value === "string" && value) {
+      return { field, url: value };
+    }
+  }
+  return { field: "", url: "" };
 }
 
 function getProcessedOAuthRedirectUrl(authorizationId) {
@@ -549,16 +607,6 @@ function oauthRedirectStorageKey(authorizationId) {
   return `soo.oauth.redirect.${authorizationId}`;
 }
 
-async function getOAuthAuthorizationDetails(authorizationId) {
-  const oauth = supabase.auth.oauth;
-  if (oauth?.getAuthorizationDetails) {
-    const { data, error } = await oauth.getAuthorizationDetails(authorizationId);
-    if (error) throw error;
-    return data;
-  }
-  return fetchOAuthAuthorizationDetails(authorizationId);
-}
-
 async function submitOAuthConsent(authorizationId, action) {
   const oauth = supabase.auth.oauth;
   const method = action === "approve" ? "approveAuthorization" : "denyAuthorization";
@@ -572,10 +620,31 @@ async function submitOAuthConsent(authorizationId, action) {
 
 async function fetchOAuthAuthorizationDetails(authorizationId) {
   const token = await getCurrentAccessToken();
+  oauthDetailsRequested = true;
+  oauthDetailsRequestCount += 1;
+  logOAuthDebug("authorization details request started", {
+    authorization_id: authorizationId,
+    request_count: oauthDetailsRequestCount
+  });
   const response = await fetch(`${supabase.supabaseUrl}/auth/v1/oauth/authorizations/${encodeURIComponent(authorizationId)}`, {
     headers: oauthRequestHeaders(token)
   });
-  return parseOAuthResponse(response);
+  const payload = await response.json().catch(() => null);
+  const redirectInfo = getOAuthRedirectInfo(payload);
+  logOAuthDebug("authorization details response", {
+    authorization_id: authorizationId,
+    request_count: oauthDetailsRequestCount,
+    status: response.status,
+    json_keys: Object.keys(payload || {}),
+    auto_approved: payload?.auto_approved === true,
+    redirect_field: redirectInfo.field || null
+  });
+  if (!response.ok) {
+    const error = new Error(payload?.msg || payload?.message || payload?.error_description || payload?.error || `Supabase retornou ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
+  return payload;
 }
 
 async function fetchOAuthConsent(authorizationId, action) {
@@ -602,6 +671,10 @@ function oauthRequestHeaders(token) {
     authorization: `Bearer ${token}`,
     accept: "application/json"
   };
+}
+
+function logOAuthDebug(message, data = {}) {
+  console.info("[SOO OAuth]", message, data);
 }
 
 async function parseOAuthResponse(response) {
