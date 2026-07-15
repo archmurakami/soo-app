@@ -13,6 +13,27 @@ type AuthContext = {
   userId: string;
 };
 
+type AuthResult =
+  | { ok: true; context: AuthContext; diagnostics: AuthDiagnostics }
+  | { ok: false; diagnostics: AuthDiagnostics };
+
+type AuthDiagnostics = {
+  authorization_header: "present" | "missing";
+  jwt_validation: "not_checked" | "valid" | "missing_bearer" | "invalid";
+  jwt_error?: string;
+  sub?: string;
+};
+
+type RequestDiagnostics = {
+  timestamp: string;
+  tool_name: string | null;
+  authorization_header: "present" | "missing";
+  jwt_validation: AuthDiagnostics["jwt_validation"];
+  jwt_error?: string;
+  sub?: string;
+  final_status: number;
+};
+
 type ComprovanteInput = {
   filename: string;
   mime_type: "image/jpeg" | "image/png" | "image/webp" | "application/pdf";
@@ -100,24 +121,44 @@ export default {
       return new Response(null, { status: 204, headers: corsHeaders(request) });
     }
 
+    const toolName = await readMcpToolName(request);
+    const preAuthDiagnostics = getPreAuthDiagnostics(request);
     const originError = validateOrigin(request);
-    if (originError) return originError;
+    if (originError) {
+      logMcpDiagnostics(toolName, preAuthDiagnostics, originError.status);
+      return originError;
+    }
 
     const rateError = rateLimit(request);
-    if (rateError) return rateError;
+    if (rateError) {
+      logMcpDiagnostics(toolName, preAuthDiagnostics, rateError.status);
+      return rateError;
+    }
 
     const auth = await authenticate(request, env);
-    if (!auth.ok) return unauthorized(request);
+    if (!auth.ok) {
+      const response = unauthorized(request);
+      logMcpDiagnostics(toolName, auth.diagnostics, response.status);
+      return response;
+    }
 
     const server = createServer(env, auth.context);
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
 
     await server.connect(transport);
-    const response = await transport.handleRequest(request, {
-      authInfo: { token: auth.context.accessToken, clientId: auth.context.userId, scopes: ["openid", "email", "profile"] }
-    });
-    await server.close();
-    return withCors(response, request);
+    try {
+      const response = await transport.handleRequest(request, {
+        authInfo: { token: auth.context.accessToken, clientId: auth.context.userId, scopes: ["openid", "email", "profile"] }
+      });
+      const finalResponse = withCors(response, request);
+      logMcpDiagnostics(toolName, auth.diagnostics, finalResponse.status);
+      return finalResponse;
+    } catch (error) {
+      logMcpDiagnostics(toolName, auth.diagnostics, 500, error);
+      throw error;
+    } finally {
+      await server.close();
+    }
   }
 };
 
@@ -355,16 +396,35 @@ function despesaCriadaResult(despesa: Record<string, any>, obra: unknown, contat
   });
 }
 
-async function authenticate(request: Request, env: Env): Promise<{ ok: true; context: AuthContext } | { ok: false }> {
+async function authenticate(request: Request, env: Env): Promise<AuthResult> {
   const authorization = request.headers.get("authorization") || "";
+  const diagnostics: AuthDiagnostics = {
+    authorization_header: authorization ? "present" : "missing",
+    jwt_validation: "not_checked"
+  };
   const match = authorization.match(/^Bearer\s+(.+)$/i);
-  if (!match) return { ok: false };
+  if (!match) return { ok: false, diagnostics: { ...diagnostics, jwt_validation: authorization ? "missing_bearer" : "not_checked" } };
 
   const issuer = `${env.SUPABASE_URL}/auth/v1`;
   const jwks = getJwks(`${issuer}/.well-known/jwks.json`);
-  const { payload } = await jwtVerify(match[1], jwks, { issuer });
-  if (!payload.sub) return { ok: false };
-  return { ok: true, context: { accessToken: match[1], userId: payload.sub } };
+  try {
+    const { payload } = await jwtVerify(match[1], jwks, { issuer });
+    if (!payload.sub) return { ok: false, diagnostics: { ...diagnostics, jwt_validation: "invalid", jwt_error: "missing_sub" } };
+    return {
+      ok: true,
+      context: { accessToken: match[1], userId: payload.sub },
+      diagnostics: { ...diagnostics, jwt_validation: "valid", sub: payload.sub }
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      diagnostics: {
+        ...diagnostics,
+        jwt_validation: "invalid",
+        jwt_error: safeJwtError(error)
+      }
+    };
+  }
 }
 
 function getJwks(url: string) {
@@ -383,6 +443,63 @@ function unauthorized(request: Request) {
     ...corsHeaders(request)
   });
   return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers });
+}
+
+function getPreAuthDiagnostics(request: Request): AuthDiagnostics {
+  return {
+    authorization_header: request.headers.get("authorization") ? "present" : "missing",
+    jwt_validation: "not_checked"
+  };
+}
+
+async function readMcpToolName(request: Request) {
+  if (request.method !== "POST") return null;
+  try {
+    const payload = await request.clone().json() as unknown;
+    return extractToolName(payload);
+  } catch {
+    return null;
+  }
+}
+
+function extractToolName(payload: unknown): string | null {
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      const name = extractToolName(item);
+      if (name) return name;
+    }
+    return null;
+  }
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+  if (record.method !== "tools/call") return typeof record.method === "string" ? record.method : null;
+  const params = record.params;
+  if (!params || typeof params !== "object") return "tools/call";
+  const name = (params as Record<string, unknown>).name;
+  return typeof name === "string" ? name : "tools/call";
+}
+
+function logMcpDiagnostics(toolName: string | null, auth: AuthDiagnostics, finalStatus: number, error?: unknown) {
+  const entry: RequestDiagnostics = {
+    timestamp: new Date().toISOString(),
+    tool_name: toolName,
+    authorization_header: auth.authorization_header,
+    jwt_validation: auth.jwt_validation,
+    final_status: finalStatus
+  };
+  if (auth.jwt_error) entry.jwt_error = auth.jwt_error;
+  if (auth.sub) entry.sub = auth.sub;
+  if (error) entry.jwt_error = `worker_error:${safeJwtError(error)}`;
+  console.log(JSON.stringify({ event: "soo_mcp_call", ...entry }));
+}
+
+function safeJwtError(error: unknown) {
+  if (error && typeof error === "object") {
+    const candidate = error as { code?: unknown; name?: unknown };
+    if (typeof candidate.code === "string") return candidate.code;
+    if (typeof candidate.name === "string") return candidate.name;
+  }
+  return "unknown";
 }
 
 function oauthProtectedResourceMetadata() {
