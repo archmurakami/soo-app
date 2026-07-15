@@ -467,19 +467,19 @@ async function loadOAuthConsentDetailsOnce(authorizationId) {
     const details = await fetchOAuthAuthorizationDetails(authorizationId);
     oauthAuthorizationDetails = details;
     const redirectInfo = getOAuthRedirectInfo(details);
-    const authorizationState = getOAuthAuthorizationState(details);
-    logOAuthDebug("authorization details received", {
-      authorization_id: authorizationId,
-      ...getSafeOAuthDetailsForLog(details),
-      redirect_field: redirectInfo.field || null
-    });
-    if (authorizationState.processed && redirectInfo.url) {
+    if (redirectInfo.url) {
       rememberProcessedOAuthRedirectUrl(authorizationId, redirectInfo.url);
       oauthRedirectStarted = true;
       redirecting = true;
       window.location.replace(redirectInfo.url);
       return;
     }
+    const authorizationState = getOAuthAuthorizationState(details);
+    logOAuthDebug("authorization details received", {
+      authorization_id: authorizationId,
+      ...getSafeOAuthDetailsForLog(details),
+      redirect_field: redirectInfo.field || null
+    });
     if (authorizationState.processed) {
       showMessage("Esta solicitaÃ§Ã£o jÃ¡ foi processada. Feche esta aba e conecte novamente pelo ChatGPT.", "error");
       setOAuthButtonsVisible(false);
