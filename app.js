@@ -673,6 +673,148 @@ function isSensitiveOAuthField(key) {
   return /authorization_code|access_token|refresh_token|client_secret|code_challenge|code_verifier|nonce|token|secret/.test(key);
 }
 
+function captureOAuthResponseDiagnostics(payload, meta = {}) {
+  const sanitized = sanitizeOAuthDetails(payload);
+  const shape = getOAuthRawShape(payload);
+  window.__SOO_OAUTH_DEBUG__ = {
+    captured_at: new Date().toISOString(),
+    ...meta,
+    details: sanitized
+  };
+  window.__SOO_OAUTH_RAW_SHAPE__ = {
+    captured_at: new Date().toISOString(),
+    ...meta,
+    shape
+  };
+  console.log("[SOO OAuth] sanitized details", window.__SOO_OAUTH_DEBUG__);
+  console.log("[SOO OAuth] response shape", window.__SOO_OAUTH_RAW_SHAPE__);
+}
+
+function sanitizeOAuthDetails(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeOAuthDetails(item));
+  }
+  if (!value || typeof value !== "object") {
+    return {
+      type: getValueType(value)
+    };
+  }
+
+  const output = {};
+  Object.entries(value).forEach(([key, nestedValue]) => {
+    const normalizedKey = key.toLowerCase();
+    if (isSensitiveOAuthField(normalizedKey)) return;
+
+    if (isSafeOAuthValueField(normalizedKey) && isSafeScalar(nestedValue)) {
+      output[key] = nestedValue;
+      return;
+    }
+
+    if (Array.isArray(nestedValue)) {
+      output[key] = {
+        type: "array",
+        length: nestedValue.length,
+        item_types: [...new Set(nestedValue.map((item) => getValueType(item)))]
+      };
+      return;
+    }
+
+    if (nestedValue && typeof nestedValue === "object") {
+      output[key] = {
+        type: "object",
+        keys: Object.keys(nestedValue).filter((nestedKey) => !isSensitiveOAuthField(nestedKey.toLowerCase())),
+        fields: getNestedKeyTypes(nestedValue)
+      };
+      return;
+    }
+
+    output[key] = {
+      type: getValueType(nestedValue)
+    };
+  });
+
+  return output;
+}
+
+function getOAuthRawShape(value) {
+  if (Array.isArray(value)) {
+    return {
+      type: "array",
+      length: value.length,
+      item_shapes: value.slice(0, 3).map((item) => getOAuthRawShape(item))
+    };
+  }
+  if (!value || typeof value !== "object") {
+    return {
+      type: getValueType(value)
+    };
+  }
+
+  const shape = {};
+  Object.entries(value).forEach(([key, nestedValue]) => {
+    const normalizedKey = key.toLowerCase();
+    if (isSensitiveOAuthField(normalizedKey)) return;
+    if (Array.isArray(nestedValue)) {
+      shape[key] = {
+        type: "array",
+        length: nestedValue.length,
+        item_types: [...new Set(nestedValue.map((item) => getValueType(item)))]
+      };
+      return;
+    }
+    if (nestedValue && typeof nestedValue === "object") {
+      shape[key] = {
+        type: "object",
+        keys: Object.keys(nestedValue).filter((nestedKey) => !isSensitiveOAuthField(nestedKey.toLowerCase())),
+        fields: getNestedKeyTypes(nestedValue)
+      };
+      return;
+    }
+    shape[key] = {
+      type: getValueType(nestedValue)
+    };
+  });
+  return shape;
+}
+
+function getNestedKeyTypes(value) {
+  const fields = {};
+  Object.entries(value || {}).forEach(([key, nestedValue]) => {
+    if (isSensitiveOAuthField(key.toLowerCase())) return;
+    fields[key] = getValueType(nestedValue);
+  });
+  return fields;
+}
+
+function isSafeOAuthValueField(key) {
+  return [
+    "auto_approved",
+    "approved",
+    "pending",
+    "status",
+    "client_name",
+    "app_name",
+    "scopes",
+    "scope",
+    "requested_scopes",
+    "redirect_url",
+    "redirect_uri",
+    "redirect_to",
+    "redirectto",
+    "url"
+  ].includes(key);
+}
+
+function isSafeScalar(value) {
+  return value === null || ["string", "number", "boolean"].includes(typeof value);
+}
+
+function getValueType(value) {
+  if (Array.isArray(value)) return "array";
+  if (value === null) return "null";
+  return typeof value;
+}
+
 function getProcessedOAuthRedirectUrl(authorizationId) {
   try {
     return sessionStorage.getItem(oauthRedirectStorageKey(authorizationId)) || "";
@@ -717,6 +859,11 @@ async function fetchOAuthAuthorizationDetails(authorizationId) {
     headers: oauthRequestHeaders(token)
   });
   const payload = await response.json().catch(() => null);
+  captureOAuthResponseDiagnostics(payload, {
+    authorization_id: authorizationId,
+    request_count: oauthDetailsRequestCount,
+    http_status: response.status
+  });
   const redirectInfo = getOAuthRedirectInfo(payload);
   oauthBootLog(9, "resposta do fetch recebida", {
     authorization_id: authorizationId,
