@@ -467,16 +467,23 @@ async function loadOAuthConsentDetailsOnce(authorizationId) {
     const details = await fetchOAuthAuthorizationDetails(authorizationId);
     oauthAuthorizationDetails = details;
     const redirectInfo = getOAuthRedirectInfo(details);
+    const authorizationState = getOAuthAuthorizationState(details);
     logOAuthDebug("authorization details received", {
       authorization_id: authorizationId,
-      auto_approved: details?.auto_approved === true,
+      ...getSafeOAuthDetailsForLog(details),
       redirect_field: redirectInfo.field || null
     });
-    if (details?.auto_approved === true && redirectInfo.url) {
+    if (authorizationState.processed && redirectInfo.url) {
       rememberProcessedOAuthRedirectUrl(authorizationId, redirectInfo.url);
       oauthRedirectStarted = true;
       redirecting = true;
       window.location.replace(redirectInfo.url);
+      return;
+    }
+    if (authorizationState.processed) {
+      showMessage("Esta solicitaÃ§Ã£o jÃ¡ foi processada. Feche esta aba e conecte novamente pelo ChatGPT.", "error");
+      setOAuthButtonsVisible(false);
+      showView("oauthConsent");
       return;
     }
     renderOAuthConsent(details);
@@ -523,6 +530,15 @@ function renderOAuthConsent(details) {
   const clientName = client.client_name || client.name || details?.client_name || "ChatGPT";
   const scopes = details?.scopes || details?.scope || details?.requested_scopes || details?.requestedScopes || [];
   const scopeList = normalizeScopes(scopes);
+  const authorizationState = getOAuthAuthorizationState(details);
+
+  if (authorizationState.processed) {
+    setOAuthButtonsVisible(false);
+    setOAuthButtonsEnabled(false);
+    showMessage("Esta solicitaÃ§Ã£o jÃ¡ foi processada. Feche esta aba e conecte novamente pelo ChatGPT.", "error");
+    showView("oauthConsent");
+    return;
+  }
 
   els.userEmail.textContent = session?.user?.email || "";
   els.sessionBar.hidden = false;
@@ -604,6 +620,59 @@ function getOAuthRedirectInfo(data) {
   return { field: "", url: "" };
 }
 
+function getOAuthAuthorizationState(data) {
+  const status = String(data?.status || data?.authorization_status || "").toLowerCase();
+  const autoApproved = data?.auto_approved === true;
+  const approved = data?.approved === true || status === "approved";
+  const denied = data?.denied === true || status === "denied" || status === "rejected";
+  const pending = data?.pending === true || status === "pending";
+  const explicitlyNotPending = data?.pending === false || Boolean(status && status !== "pending");
+  return {
+    status,
+    autoApproved,
+    approved,
+    denied,
+    pending,
+    processed: autoApproved || approved || denied || explicitlyNotPending
+  };
+}
+
+function getSafeOAuthDetailsForLog(data) {
+  const client = data?.client || data?.client_metadata || data?.oauth_client || {};
+  const redirectInfo = getOAuthRedirectInfo(data);
+  const state = getOAuthAuthorizationState(data);
+  const safe = {
+    status: data?.status || data?.authorization_status || null,
+    auto_approved: data?.auto_approved === true,
+    approved: data?.approved === true || state.approved,
+    pending: data?.pending === true ? true : data?.pending === false ? false : state.pending || null,
+    processed: state.processed,
+    client_name: client.client_name || client.name || data?.client_name || data?.app_name || null,
+    app_name: data?.app_name || client.app_name || null,
+    scopes: normalizeScopes(data?.scopes || data?.scope || data?.requested_scopes || data?.requestedScopes || []),
+    redirect_field: redirectInfo.field || null,
+    has_redirect_url: Boolean(redirectInfo.url),
+    boolean_fields: {},
+    state_fields: {}
+  };
+
+  Object.entries(data || {}).forEach(([key, value]) => {
+    const normalizedKey = key.toLowerCase();
+    if (isSensitiveOAuthField(normalizedKey)) return;
+    if (typeof value === "boolean") {
+      safe.boolean_fields[key] = value;
+    } else if (typeof value === "string" && /status|state|pending|approved|denied|consent/.test(normalizedKey)) {
+      safe.state_fields[key] = value;
+    }
+  });
+
+  return safe;
+}
+
+function isSensitiveOAuthField(key) {
+  return /authorization_code|access_token|refresh_token|client_secret|code_challenge|code_verifier|nonce|token|secret/.test(key);
+}
+
 function getProcessedOAuthRedirectUrl(authorizationId) {
   try {
     return sessionStorage.getItem(oauthRedirectStorageKey(authorizationId)) || "";
@@ -654,7 +723,7 @@ async function fetchOAuthAuthorizationDetails(authorizationId) {
     request_count: oauthDetailsRequestCount,
     status: response.status,
     json_keys: Object.keys(payload || {}),
-    auto_approved: payload?.auto_approved === true,
+    ...getSafeOAuthDetailsForLog(payload),
     redirect_field: redirectInfo.field || null
   });
   logOAuthDebug("authorization details response", {
@@ -662,7 +731,7 @@ async function fetchOAuthAuthorizationDetails(authorizationId) {
     request_count: oauthDetailsRequestCount,
     status: response.status,
     json_keys: Object.keys(payload || {}),
-    auto_approved: payload?.auto_approved === true,
+    ...getSafeOAuthDetailsForLog(payload),
     redirect_field: redirectInfo.field || null
   });
   if (!response.ok) {
