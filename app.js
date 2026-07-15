@@ -210,6 +210,8 @@ const els = {
   printAll: document.querySelector("#printAll")
 };
 
+oauthBootLog(1, "app.js executado");
+
 init().catch((error) => {
   console.error(error);
   showMessage(error.message || "Não foi possível iniciar o SOO.", "error");
@@ -221,6 +223,7 @@ init().catch((error) => {
 });
 
 async function init() {
+  oauthBootLog(2, "DOM pronto");
   bindEvents();
   registerServiceWorker();
 
@@ -230,13 +233,22 @@ async function init() {
     return;
   }
 
+  const oauthRoute = isOAuthConsentRoute();
+  oauthBootLog(3, "rota detectada", {
+    path: window.location.pathname,
+    is_oauth_consent: oauthRoute
+  });
+
   supabase.auth.onAuthStateChange(handleAuthStateChange);
 
+  oauthBootLog(5, "consultando sessão");
   const { data } = await supabase.auth.getSession();
+  oauthBootLog(5, "sessão consultada", { has_session: Boolean(data.session), has_user: Boolean(data.session?.user) });
   if (!handledInitialSession) {
     handledInitialSession = true;
     session = data.session;
-    if (isOAuthConsentRoute()) {
+    if (oauthRoute) {
+      oauthBootLog(7, "iniciando loadOAuthConsent");
       await loadOAuthConsent();
     } else if (session) {
       await loadHomeOnce();
@@ -248,13 +260,16 @@ async function init() {
 
 function handleAuthStateChange(event, nextSession) {
   session = nextSession;
+  oauthBootLog("AUTH", "evento de autenticação", { event, has_session: Boolean(nextSession), has_user: Boolean(nextSession?.user) });
 
   if (event === "INITIAL_SESSION") {
+    if (isOAuthConsentRoute()) {
+      oauthBootLog("AUTH", "INITIAL_SESSION ignorado; init controla o bootstrap OAuth");
+      return;
+    }
     if (handledInitialSession) return;
     handledInitialSession = true;
-    if (isOAuthConsentRoute()) {
-      return;
-    } else if (session) {
+    if (session) {
       loadHomeOnce();
     } else {
       showView("login");
@@ -412,6 +427,7 @@ async function loadOAuthConsent() {
   }
 
   const authorizationId = getOAuthAuthorizationId();
+  oauthBootLog(4, "authorization_id lido", { authorization_id: authorizationId || null });
   if (!authorizationId) {
     showMessage("Link de autorização inválido: authorization_id ausente.", "error");
     showView("login");
@@ -437,6 +453,7 @@ async function loadOAuthConsent() {
     showOAuthLogin();
     return;
   }
+  oauthBootLog(6, "usuário autenticado", { has_user: true });
 
   const loadPromise = loadOAuthConsentDetailsOnce(authorizationId);
   oauthLoadPromises.set(authorizationId, loadPromise);
@@ -622,6 +639,7 @@ async function fetchOAuthAuthorizationDetails(authorizationId) {
   const token = await getCurrentAccessToken();
   oauthDetailsRequested = true;
   oauthDetailsRequestCount += 1;
+  oauthBootLog(8, "antes do fetch", { authorization_id: authorizationId, request_count: oauthDetailsRequestCount });
   logOAuthDebug("authorization details request started", {
     authorization_id: authorizationId,
     request_count: oauthDetailsRequestCount
@@ -631,6 +649,14 @@ async function fetchOAuthAuthorizationDetails(authorizationId) {
   });
   const payload = await response.json().catch(() => null);
   const redirectInfo = getOAuthRedirectInfo(payload);
+  oauthBootLog(9, "resposta do fetch recebida", {
+    authorization_id: authorizationId,
+    request_count: oauthDetailsRequestCount,
+    status: response.status,
+    json_keys: Object.keys(payload || {}),
+    auto_approved: payload?.auto_approved === true,
+    redirect_field: redirectInfo.field || null
+  });
   logOAuthDebug("authorization details response", {
     authorization_id: authorizationId,
     request_count: oauthDetailsRequestCount,
@@ -675,6 +701,11 @@ function oauthRequestHeaders(token) {
 
 function logOAuthDebug(message, data = {}) {
   console.info("[SOO OAuth]", message, data);
+}
+
+function oauthBootLog(step, message, data = {}) {
+  if (!isOAuthConsentRoute()) return;
+  console.info(`[SOO OAuth] BOOT ${step}: ${message}`, data);
 }
 
 async function parseOAuthResponse(response) {
