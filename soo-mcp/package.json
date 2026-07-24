@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "typecheck": "tsc --noEmit",
+    "test:tools": "tsc -p tsconfig.tools-test.json && node .tmp-tools-test/tools-list.test.js",
     "deploy": "wrangler deploy",
     "check": "wrangler check"
   },

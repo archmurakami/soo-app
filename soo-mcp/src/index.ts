@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import * as z from "zod/v4";
@@ -34,16 +35,51 @@ type RequestDiagnostics = {
   final_status: number;
 };
 
-type ComprovanteInput = {
+type OpenAIFileInput = {
+  download_url: string;
+  file_id: string;
+  mime_type?: string;
+  file_name?: string;
+};
+
+type DownloadedComprovante = {
+  bytes: Uint8Array;
   filename: string;
   mime_type: "image/jpeg" | "image/png" | "image/webp" | "application/pdf";
-  data_base64: string;
+  size: number;
+};
+
+type DespesaArgs = {
+  obra_id: string;
+  descricao: string;
+  valor: number;
+  data: string;
+  contato_id?: string;
+  contato_nome?: string;
+  quem_pagou: string;
+  categoria: string;
+  observacao?: string;
+  confirmacao_usuario: boolean;
+  idempotency_key: string;
+};
+
+type FileUploadDiagnostics = {
+  tool: "criar_despesa_com_comprovante";
+  file_metadata_received: boolean;
+  file_name?: string;
+  mime_type?: string;
+  informed_size?: number;
+  downloaded_size?: number;
+  upload_status?: "completed" | "failed" | "not_started";
+  comprovante_path?: string;
+  final_status: "success" | "error";
 };
 
 const RESOURCE_URL = "https://soo-mcp.rymurakami.workers.dev";
 const AUTH_SERVER = "https://nlfzjmruzmstrysuohxl.supabase.co/auth/v1";
 const OAUTH_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource";
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const MIN_FILE_BYTES = 256;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX_REQUESTS = 60;
 const CATEGORIES = [
@@ -66,7 +102,7 @@ const CATEGORIES = [
   "Caçamba",
   "Outros"
 ];
-const MIME_TO_EXT: Record<ComprovanteInput["mime_type"], string> = {
+const MIME_TO_EXT: Record<DownloadedComprovante["mime_type"], string> = {
   "image/jpeg": "jpg",
   "image/png": "png",
   "image/webp": "webp",
@@ -91,11 +127,47 @@ const OAUTH_META = {
     }
   ]
 };
+const OPENAI_TOOL_SECURITY_META = {
+  ...OAUTH_META,
+  "openai/toolInvocation/invoking": "Processando no SOO...",
+  "openai/toolInvocation/invoked": "SOO atualizado"
+};
+const READ_ONLY_ANNOTATIONS: ToolAnnotations = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  openWorldHint: false
+};
+const CREATE_ANNOTATIONS: ToolAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false
+};
+const UPDATE_ANNOTATIONS: ToolAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: false
+};
 
-const ComprovanteSchema = z.object({
-  filename: z.string().min(1),
-  mime_type: z.enum(["image/jpeg", "image/png", "image/webp", "application/pdf"]),
-  data_base64: z.string().min(1)
+const DespesaInputSchema = {
+  obra_id: z.string().uuid(),
+  descricao: z.string().min(1),
+  valor: z.number().nonnegative(),
+  data: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  contato_id: z.string().uuid().optional(),
+  contato_nome: z.string().optional(),
+  quem_pagou: z.string().min(1),
+  categoria: z.string().min(1),
+  observacao: z.string().optional(),
+  confirmacao_usuario: z.boolean(),
+  idempotency_key: z.string().min(8).max(160)
+};
+const OpenAIFileSchema = z.strictObject({
+  download_url: z.string().url(),
+  file_id: z.string().min(1),
+  mime_type: z.string().optional(),
+  file_name: z.string().optional()
 });
 
 const rateBuckets = new Map<string, { count: number; resetAt: number }>();
@@ -150,7 +222,8 @@ export default {
       const response = await transport.handleRequest(request, {
         authInfo: { token: auth.context.accessToken, clientId: auth.context.userId, scopes: ["openid", "email", "profile"] }
       });
-      const finalResponse = withCors(response, request);
+      const decoratedResponse = await withOpenAiToolDescriptors(response, toolName);
+      const finalResponse = withCors(decoratedResponse, request);
       logMcpDiagnostics(toolName, auth.diagnostics, finalResponse.status);
       return finalResponse;
     } catch (error) {
@@ -162,15 +235,16 @@ export default {
   }
 };
 
-function createServer(env: Env, auth: AuthContext) {
-  const server = new McpServer({ name: "soo-mcp", version: "1.0.0" });
+export function createServer(env: Env, auth: AuthContext) {
+  const server = new McpServer({ name: "soo-mcp", version: "1.1.0" });
 
   server.registerTool(
     "listar_obras",
     {
       title: "Listar obras",
       description: "Lista obras do usuário autenticado no SOO.",
-      _meta: OAUTH_META
+      annotations: READ_ONLY_ANNOTATIONS,
+      _meta: OPENAI_TOOL_SECURITY_META
     },
     async () => {
       const obras = await supabaseGet(
@@ -188,7 +262,8 @@ function createServer(env: Env, auth: AuthContext) {
       title: "Buscar contatos",
       description: "Busca contatos do usuário autenticado por nome, CPF/CNPJ ou telefone.",
       inputSchema: { termo: z.string().min(1) },
-      _meta: OAUTH_META
+      annotations: READ_ONLY_ANNOTATIONS,
+      _meta: OPENAI_TOOL_SECURITY_META
     },
     async ({ termo }) => {
       const query = encodeURIComponent(`%${escapeLike(termo.trim())}%`);
@@ -206,9 +281,22 @@ function createServer(env: Env, auth: AuthContext) {
     {
       title: "Listar categorias",
       description: "Lista categorias de despesas do SOO.",
-      _meta: OAUTH_META
+      annotations: READ_ONLY_ANNOTATIONS,
+      _meta: OPENAI_TOOL_SECURITY_META
     },
     async () => toolJson(CATEGORIES)
+  );
+
+  server.registerTool(
+    "criar_despesa",
+    {
+      title: "Criar despesa",
+      description: "Cria despesa confirmada pelo usuário autenticado sem anexar comprovante.",
+      inputSchema: DespesaInputSchema,
+      annotations: CREATE_ANNOTATIONS,
+      _meta: OPENAI_TOOL_SECURITY_META
+    },
+    async (args) => criarDespesa(env, auth, args)
   );
 
   server.registerTool(
@@ -217,20 +305,14 @@ function createServer(env: Env, auth: AuthContext) {
       title: "Criar despesa com comprovante",
       description: "Cria despesa confirmada pelo usuário autenticado e envia comprovante ao Supabase Storage.",
       inputSchema: {
-        obra_id: z.string().uuid(),
-        descricao: z.string().min(1),
-        valor: z.number().nonnegative(),
-        data: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-        contato_id: z.string().uuid().optional(),
-        contato_nome: z.string().optional(),
-        quem_pagou: z.string().min(1),
-        categoria: z.string().min(1),
-        observacao: z.string().optional(),
-        confirmacao_usuario: z.boolean(),
-        idempotency_key: z.string().min(8).max(160),
-        comprovante: ComprovanteSchema
+        ...DespesaInputSchema,
+        comprovante: OpenAIFileSchema
       },
-      _meta: OAUTH_META
+      annotations: CREATE_ANNOTATIONS,
+      _meta: {
+        ...OPENAI_TOOL_SECURITY_META,
+        "openai/fileParams": ["comprovante"]
+      }
     },
     async (args) => criarDespesaComComprovante(env, auth, args)
   );
@@ -251,7 +333,8 @@ function createServer(env: Env, auth: AuthContext) {
         observacao: z.string().nullable().optional(),
         confirmacao_usuario: z.boolean()
       },
-      _meta: OAUTH_META
+      annotations: UPDATE_ANNOTATIONS,
+      _meta: OPENAI_TOOL_SECURITY_META
     },
     async (args) => atualizarDespesa(env, auth, args)
   );
@@ -259,23 +342,38 @@ function createServer(env: Env, auth: AuthContext) {
   return server;
 }
 
-async function criarDespesaComComprovante(
+async function criarDespesa(env: Env, auth: AuthContext, args: DespesaArgs) {
+  return criarDespesaBase(env, auth, args, null);
+}
+
+async function criarDespesaComComprovante(env: Env, auth: AuthContext, args: DespesaArgs & { comprovante: OpenAIFileInput }) {
+  const diagnostics: FileUploadDiagnostics = {
+    tool: "criar_despesa_com_comprovante",
+    file_metadata_received: Boolean(args.comprovante?.download_url && args.comprovante?.file_id),
+    file_name: args.comprovante?.file_name,
+    mime_type: args.comprovante?.mime_type,
+    upload_status: "not_started",
+    final_status: "error"
+  };
+
+  try {
+    const comprovante = await downloadComprovante(args.comprovante, diagnostics);
+    const result = await criarDespesaBase(env, auth, args, comprovante, diagnostics);
+    diagnostics.final_status = "isError" in result && result.isError ? "error" : "success";
+    return result;
+  } catch (error) {
+    diagnostics.final_status = "error";
+    logFileUploadDiagnostics(diagnostics);
+    return toolError(error instanceof Error ? error.message : "Falha ao processar comprovante.");
+  }
+}
+
+async function criarDespesaBase(
   env: Env,
   auth: AuthContext,
-  args: {
-    obra_id: string;
-    descricao: string;
-    valor: number;
-    data: string;
-    contato_id?: string;
-    contato_nome?: string;
-    quem_pagou: string;
-    categoria: string;
-    observacao?: string;
-    confirmacao_usuario: boolean;
-    idempotency_key: string;
-    comprovante: ComprovanteInput;
-  }
+  args: DespesaArgs,
+  comprovante: DownloadedComprovante | null,
+  diagnostics?: FileUploadDiagnostics
 ) {
   const avisos: string[] = [];
   if (args.confirmacao_usuario !== true) return toolError("Confirmação do usuário é obrigatória antes de registrar a despesa.");
@@ -292,10 +390,8 @@ async function criarDespesaComComprovante(
     if (!contato) return toolError("Contato não encontrado para o usuário autenticado.");
   }
 
-  validateComprovante(args.comprovante);
-  const extension = extensionFor(args.comprovante);
-  const now = new Date();
-  const storagePath = `${auth.userId}/${args.obra_id}/${now.getUTCFullYear()}/${pad2(now.getUTCMonth() + 1)}/${crypto.randomUUID()}.${extension}`;
+  const storagePath = comprovante ? storagePathFor(auth, args.obra_id, comprovante) : null;
+  if (diagnostics && storagePath) diagnostics.comprovante_path = storagePath;
 
   if (args.contato_nome && !args.contato_id) {
     avisos.push("contato_nome foi informado sem contato_id; nenhum contato foi criado automaticamente.");
@@ -303,8 +399,13 @@ async function criarDespesaComComprovante(
 
   let uploaded = false;
   try {
-    await uploadStorage(env, auth, storagePath, args.comprovante);
-    uploaded = true;
+    if (comprovante && storagePath) {
+      await uploadStorage(env, auth, storagePath, comprovante);
+      uploaded = true;
+      const exists = await storageObjectExists(env, auth, storagePath);
+      if (!exists) throw new Error("Upload do comprovante não foi confirmado no Storage.");
+      diagnostics!.upload_status = "completed";
+    }
 
     const observacao = args.contato_nome && !args.contato_id
       ? joinObservation(args.observacao, `Contato informado pelo ChatGPT: ${args.contato_nome}`)
@@ -326,14 +427,29 @@ async function criarDespesaComComprovante(
       origem: "chatgpt"
     });
 
-    return despesaCriadaResult(inserted, obra, contato, false, avisos);
+    const result = despesaCriadaResult(inserted, obra, contato, false, avisos);
+    if (diagnostics) {
+      diagnostics.final_status = "success";
+      logFileUploadDiagnostics(diagnostics);
+    }
+    return result;
   } catch (error) {
+    if (diagnostics) diagnostics.upload_status = uploaded ? "completed" : "failed";
     const existing = await findDespesaByIdempotency(env, auth, args.idempotency_key).catch(() => null);
     if (existing) {
-      if (uploaded) await deleteStorage(env, auth, storagePath).catch(() => undefined);
-      return despesaCriadaResult(existing, existing.obras ?? obra, existing.contatos ?? contato, true, avisos);
+      if (uploaded && storagePath) await deleteStorage(env, auth, storagePath).catch(() => undefined);
+      const result = despesaCriadaResult(existing, existing.obras ?? obra, existing.contatos ?? contato, true, avisos);
+      if (diagnostics) {
+        diagnostics.final_status = "success";
+        logFileUploadDiagnostics(diagnostics);
+      }
+      return result;
     }
-    if (uploaded) await deleteStorage(env, auth, storagePath).catch(() => undefined);
+    if (uploaded && storagePath) await deleteStorage(env, auth, storagePath).catch(() => undefined);
+    if (diagnostics) {
+      diagnostics.final_status = "error";
+      logFileUploadDiagnostics(diagnostics);
+    }
     throw error;
   }
 }
@@ -584,8 +700,7 @@ async function findDespesaByIdempotency(env: Env, auth: AuthContext, idempotency
   return rows[0] ?? null;
 }
 
-async function uploadStorage(env: Env, auth: AuthContext, path: string, comprovante: ComprovanteInput) {
-  const bytes = base64ToBytes(comprovante.data_base64);
+async function uploadStorage(env: Env, auth: AuthContext, path: string, comprovante: DownloadedComprovante) {
   const response = await fetch(`${env.SUPABASE_URL}/storage/v1/object/comprovantes/${path}`, {
     method: "POST",
     headers: {
@@ -594,9 +709,20 @@ async function uploadStorage(env: Env, auth: AuthContext, path: string, comprova
       "content-type": comprovante.mime_type,
       "x-upsert": "false"
     },
-    body: bytes
+    body: new Blob([comprovante.bytes.slice().buffer as ArrayBuffer], { type: comprovante.mime_type })
   });
   if (!response.ok) throw new Error(`Falha ao enviar comprovante (${response.status})`);
+}
+
+async function storageObjectExists(env: Env, auth: AuthContext, path: string) {
+  const response = await fetch(`${env.SUPABASE_URL}/storage/v1/object/comprovantes/${path}`, {
+    method: "HEAD",
+    headers: {
+      apikey: env.SUPABASE_PUBLISHABLE_KEY,
+      authorization: `Bearer ${auth.accessToken}`
+    }
+  });
+  return response.ok;
 }
 
 async function deleteStorage(env: Env, auth: AuthContext, path: string) {
@@ -612,34 +738,108 @@ async function deleteStorage(env: Env, auth: AuthContext, path: string) {
   if (!response.ok) throw new Error(`Falha ao remover comprovante (${response.status})`);
 }
 
-function validateComprovante(comprovante: ComprovanteInput) {
-  const expectedExt = extensionFor(comprovante);
-  const ext = comprovante.filename.split(".").pop()?.toLowerCase();
-  if (!ext || (expectedExt === "jpg" ? !["jpg", "jpeg"].includes(ext) : ext !== expectedExt)) {
-    throw new Error("Extensão do comprovante não corresponde ao MIME type.");
-  }
-  const size = base64Size(comprovante.data_base64);
-  if (size > MAX_FILE_BYTES) throw new Error("Comprovante excede o limite de 10 MB.");
-}
-
-function extensionFor(comprovante: ComprovanteInput) {
+function extensionFor(comprovante: DownloadedComprovante) {
   const ext = MIME_TO_EXT[comprovante.mime_type];
   if (!ext) throw new Error("Tipo de comprovante não permitido.");
   return ext;
 }
 
-function base64ToBytes(value: string) {
-  const normalized = value.includes(",") ? value.split(",").pop() || "" : value;
-  const binary = atob(normalized);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+async function downloadComprovante(file: OpenAIFileInput, diagnostics: FileUploadDiagnostics): Promise<DownloadedComprovante> {
+  if (!file?.download_url || !file.file_id) throw new Error("Comprovante não foi recebido pelo ChatGPT.");
+
+  const response = await fetch(file.download_url, { method: "GET", redirect: "follow" });
+  if (!response.ok) throw new Error(`Falha ao baixar comprovante (${response.status}).`);
+
+  const headerMime = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+  const mime = normalizeMime(headerMime || file.mime_type);
+  if (!mime) throw new Error("Tipo de comprovante não permitido.");
+
+  const informedSize = Number(response.headers.get("content-length") || "");
+  if (Number.isFinite(informedSize) && informedSize > 0) diagnostics.informed_size = informedSize;
+  if (diagnostics.informed_size && diagnostics.informed_size > MAX_FILE_BYTES) throw new Error("Comprovante excede o limite de 10 MB.");
+
+  const bytes = await readLimitedBytes(response, MAX_FILE_BYTES);
+  diagnostics.downloaded_size = bytes.byteLength;
+  validateDownloadedComprovante(bytes, mime, file.file_name);
+
+  return {
+    bytes,
+    filename: safeFileName(file.file_name || `${file.file_id}.${MIME_TO_EXT[mime]}`),
+    mime_type: mime,
+    size: bytes.byteLength
+  };
+}
+
+function validateDownloadedComprovante(bytes: Uint8Array, mime: DownloadedComprovante["mime_type"], filename?: string) {
+  if (bytes.byteLength < MIN_FILE_BYTES) throw new Error("Comprovante vazio ou inválido.");
+  if (bytes.byteLength > MAX_FILE_BYTES) throw new Error("Comprovante excede o limite de 10 MB.");
+
+  const expectedExt = MIME_TO_EXT[mime];
+  const ext = filename?.split(".").pop()?.toLowerCase();
+  if (ext && (expectedExt === "jpg" ? !["jpg", "jpeg"].includes(ext) : ext !== expectedExt)) {
+    throw new Error("Extensão do comprovante não corresponde ao MIME type.");
+  }
+
+  if (mime === "image/png" && !hasMagic(bytes, [0x89, 0x50, 0x4e, 0x47])) throw new Error("Arquivo PNG inválido.");
+  if (mime === "image/jpeg" && !hasMagic(bytes, [0xff, 0xd8, 0xff])) throw new Error("Arquivo JPEG inválido.");
+  if (mime === "image/webp" && !(hasAscii(bytes, 0, "RIFF") && hasAscii(bytes, 8, "WEBP"))) throw new Error("Arquivo WebP inválido.");
+  if (mime === "application/pdf" && !hasAscii(bytes, 0, "%PDF")) throw new Error("Arquivo PDF inválido.");
+}
+
+function normalizeMime(value?: string): DownloadedComprovante["mime_type"] | null {
+  if (!value) return null;
+  const normalized = value.toLowerCase();
+  if (normalized === "image/jpg") return "image/jpeg";
+  if (normalized in MIME_TO_EXT) return normalized as DownloadedComprovante["mime_type"];
+  return null;
+}
+
+async function readLimitedBytes(response: Response, maxBytes: number) {
+  if (!response.body) return new Uint8Array(await response.arrayBuffer());
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      throw new Error("Comprovante excede o limite de 10 MB.");
+    }
+    chunks.push(value);
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
   return bytes;
 }
 
-function base64Size(value: string) {
-  const normalized = value.includes(",") ? value.split(",").pop() || "" : value;
-  const padding = normalized.endsWith("==") ? 2 : normalized.endsWith("=") ? 1 : 0;
-  return Math.floor((normalized.length * 3) / 4) - padding;
+function storagePathFor(auth: AuthContext, obraId: string, comprovante: DownloadedComprovante) {
+  const now = new Date();
+  return `${auth.userId}/${obraId}/${now.getUTCFullYear()}/${pad2(now.getUTCMonth() + 1)}/${crypto.randomUUID()}.${extensionFor(comprovante)}`;
+}
+
+function safeFileName(value: string) {
+  return value.replaceAll("\\", "/").split("/").pop()?.replace(/[^A-Za-z0-9._-]/g, "_") || "comprovante";
+}
+
+function hasMagic(bytes: Uint8Array, magic: number[]) {
+  return magic.every((value, index) => bytes[index] === value);
+}
+
+function hasAscii(bytes: Uint8Array, offset: number, value: string) {
+  return value.split("").every((char, index) => bytes[offset + index] === char.charCodeAt(0));
+}
+
+function logFileUploadDiagnostics(diagnostics: FileUploadDiagnostics) {
+  console.log(JSON.stringify({ event: "soo_mcp_file_upload", timestamp: new Date().toISOString(), ...diagnostics }));
 }
 
 function escapeLike(value: string) {
@@ -690,6 +890,41 @@ function json(body: unknown, status = 200, request?: Request) {
     status,
     headers: { "content-type": "application/json; charset=utf-8", ...corsHeaders(request) }
   });
+}
+
+export async function withOpenAiToolDescriptors(response: Response, toolName: string | null) {
+  if (toolName !== "tools/list" || !response.ok) return response;
+
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) return response;
+
+  const payload = await response.clone().json().catch(() => null);
+  const decorated = decorateToolsListPayload(payload);
+  if (decorated === payload) return response;
+
+  const headers = new Headers(response.headers);
+  headers.set("content-type", "application/json; charset=utf-8");
+  return new Response(JSON.stringify(decorated), { status: response.status, statusText: response.statusText, headers });
+}
+
+export function decorateToolsListPayload(payload: unknown): unknown {
+  if (Array.isArray(payload)) return payload.map((item) => decorateToolsListPayload(item));
+  if (!payload || typeof payload !== "object") return payload;
+
+  const record = payload as Record<string, any>;
+  const result = record.result;
+  if (!result || typeof result !== "object" || !Array.isArray(result.tools)) return payload;
+
+  return {
+    ...record,
+    result: {
+      ...result,
+      tools: result.tools.map((tool: Record<string, any>) => {
+        const securitySchemes = tool.securitySchemes ?? tool._meta?.securitySchemes;
+        return securitySchemes ? { ...tool, securitySchemes } : tool;
+      })
+    }
+  };
 }
 
 function withCors(response: Response, request: Request) {
